@@ -1,0 +1,32 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'get-it-done-web/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          script: |
+            set -e
+            cd /var/www/get-it-done
+            git fetch origin main
+            git reset --hard origin/main
+            cd get-it-done-web
+            npm ci --no-audit --no-fund
+            npm run build
+            pm2 reload get-it-done-web --update-env
+            pm2 save
+            echo "Deployed $(git rev-parse --short HEAD) at $(date -u)"
