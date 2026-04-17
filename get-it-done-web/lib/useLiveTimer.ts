@@ -5,18 +5,19 @@ import { useStore } from './store';
 // Returns the current elapsed in seconds (0 when no active session). Meant to
 // be called at root layout level so persist fires regardless of view.
 export function useLiveTimer(): number {
-  const activeSession = useStore((s) => s.activeSession);
+  const sessionId = useStore((s) => s.activeSession?.id ?? null);
+  const startedAt = useStore((s) => s.activeSession?.started_at ?? null);
   const persist = useStore((s) => s.persistActiveSessionDuration);
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
-    if (!activeSession) {
+    if (!sessionId || !startedAt) {
       setElapsed(0);
       return;
     }
+    const startMs = new Date(startedAt).getTime();
     const tick = () => {
-      const start = new Date(activeSession.started_at).getTime();
-      setElapsed(Math.max(0, Math.floor((Date.now() - start) / 1000)));
+      setElapsed(Math.max(0, Math.floor((Date.now() - startMs) / 1000)));
     };
     tick();
     const tickId = setInterval(tick, 1000);
@@ -25,7 +26,7 @@ export function useLiveTimer(): number {
       clearInterval(tickId);
       clearInterval(persistId);
     };
-  }, [activeSession, persist]);
+  }, [sessionId, startedAt, persist]);
 
   return elapsed;
 }
