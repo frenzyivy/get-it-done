@@ -10,9 +10,6 @@ import { ProgressBar } from './ProgressBar';
 export function DailyGoalBar() {
   const tasks = useStore((s) => s.tasks);
   const profile = useStore((s) => s.profileV2);
-  const sessions = useStore((s) =>
-    s.tasks.flatMap((t) => t.sessions),
-  );
 
   const goal = profile?.daily_task_goal ?? 3;
   const streak = profile?.current_streak ?? 0;
@@ -21,7 +18,8 @@ export function DailyGoalBar() {
     (t) => t.status === 'done' && isToday(t.sessions[t.sessions.length - 1]?.started_at),
   ).length;
 
-  const focusTodaySeconds = sessions
+  const focusTodaySeconds = tasks
+    .flatMap((t) => t.sessions)
     .filter((s) => isToday(s.started_at))
     .reduce((sum, s) => sum + (s.duration_seconds ?? 0), 0);
 
