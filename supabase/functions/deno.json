@@ -1,0 +1,10 @@
+{
+  "imports": {
+    "std/": "https://deno.land/std@0.224.0/",
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.45.4",
+    "@anthropic-ai/sdk": "https://esm.sh/@anthropic-ai/sdk@0.27.3"
+  },
+  "tasks": {
+    "deploy:all": "supabase functions deploy create-recurring-tasks && supabase functions deploy check-due-dates && supabase functions deploy escalate-overdue && supabase functions deploy send-notifications && supabase functions deploy daily-summary"
+  }
+}
