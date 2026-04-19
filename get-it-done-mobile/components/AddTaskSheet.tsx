@@ -14,6 +14,7 @@ import DateTimePicker, {
 import { PRIORITIES } from '@/lib/constants';
 import { useStore } from '@/lib/store';
 import { TagPicker } from './TagPicker';
+import { AiSuggestionPanel } from './AiSuggestionPanel';
 import type { Priority, Status } from '@/types';
 
 export interface AddTaskSheetHandle {
@@ -32,10 +33,12 @@ export const AddTaskSheet = forwardRef<AddTaskSheetHandle>(function AddTaskSheet
   const [dueDate, setDueDate] = useState<Date | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [estimateMin, setEstimateMin] = useState<number | null>(null);
+  const [pendingSubtasks, setPendingSubtasks] = useState<string[]>([]);
   const defaultStatusRef = useRef<Status>('todo');
 
   const tags = useStore((s) => s.tags);
   const addTask = useStore((s) => s.addTask);
+  const addSubtask = useStore((s) => s.addSubtask);
 
   useImperativeHandle(ref, () => ({
     open: (defaultStatus = 'todo') => {
@@ -51,13 +54,14 @@ export const AddTaskSheet = forwardRef<AddTaskSheetHandle>(function AddTaskSheet
     setTagIds([]);
     setDueDate(null);
     setEstimateMin(null);
+    setPendingSubtasks([]);
     setVisible(false);
   };
 
   const submit = async () => {
     const trimmed = title.trim();
     if (!trimmed) return;
-    await addTask({
+    const taskId = await addTask({
       title: trimmed,
       priority,
       tag_ids: tagIds,
@@ -65,6 +69,11 @@ export const AddTaskSheet = forwardRef<AddTaskSheetHandle>(function AddTaskSheet
       status: defaultStatusRef.current,
       estimated_seconds: estimateMin ? estimateMin * 60 : null,
     });
+    if (taskId) {
+      for (const sub of pendingSubtasks) {
+        await addSubtask(taskId, sub);
+      }
+    }
     reset();
   };
 
@@ -283,7 +292,70 @@ export const AddTaskSheet = forwardRef<AddTaskSheetHandle>(function AddTaskSheet
             </View>
           </ScrollView>
 
-          <View style={{ flexDirection: 'row', gap: 10, justifyContent: 'flex-end' }}>
+          {pendingSubtasks.length > 0 && (
+            <View
+              style={{
+                marginBottom: 12,
+                padding: 10,
+                borderRadius: 10,
+                backgroundColor: '#f9fafb',
+              }}
+            >
+              <Text
+                style={{
+                  fontSize: 10,
+                  fontWeight: '700',
+                  color: '#6b7280',
+                  textTransform: 'uppercase',
+                  letterSpacing: 0.5,
+                  marginBottom: 4,
+                }}
+              >
+                Will add {pendingSubtasks.length} subtask{pendingSubtasks.length === 1 ? '' : 's'}
+              </Text>
+              {pendingSubtasks.map((s, i) => (
+                <View
+                  key={i}
+                  style={{
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    paddingVertical: 2,
+                  }}
+                >
+                  <Text style={{ fontSize: 13, color: '#374151', flex: 1 }}>• {s}</Text>
+                  <Pressable
+                    onPress={() =>
+                      setPendingSubtasks((prev) => prev.filter((_, j) => j !== i))
+                    }
+                    hitSlop={6}
+                  >
+                    <Text style={{ fontSize: 11, color: '#9ca3af' }}>remove</Text>
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          )}
+
+          <AiSuggestionPanel
+            taskTitle={title}
+            selectedTagIds={tagIds}
+            onAcceptSubtasks={(titles) =>
+              setPendingSubtasks((prev) => [...prev, ...titles])
+            }
+            onAcceptTags={(ids) =>
+              setTagIds((prev) => Array.from(new Set([...prev, ...ids])))
+            }
+            onAcceptEstimate={(seconds) => setEstimateMin(Math.round(seconds / 60))}
+          />
+
+          <View
+            style={{
+              flexDirection: 'row',
+              gap: 10,
+              justifyContent: 'flex-end',
+              marginTop: 16,
+            }}
+          >
             <Pressable
               onPress={reset}
               style={{ paddingHorizontal: 16, paddingVertical: 10 }}

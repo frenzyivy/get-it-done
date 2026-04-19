@@ -1,16 +1,20 @@
 import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { useTheme } from 'react-native-paper';
 import { useStore } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
+import { M3Switch } from '@/components/M3Switch';
+import { useAppTheme } from '@/lib/theme-context';
+import { themes, type as M3Type, type ThemeName } from '@/lib/theme';
 import type { UserPrefs } from '@/types';
 
 const RULE_LABELS: Record<string, { label: string; desc: string }> = {
   due_soon: {
-    label: 'Due soon reminder',
-    desc: 'Notify me 24h before a task is due.',
+    label: 'Due-soon reminder',
+    desc: 'Notify 24 hours before a task is due.',
   },
   overdue: {
     label: 'Overdue reminder',
-    desc: 'Notify me once when a task passes its due date.',
+    desc: 'Notify once when a task passes its due date.',
   },
   overdue_escalate: {
     label: 'Auto-escalate overdue',
@@ -34,98 +38,160 @@ const RULE_LABELS: Record<string, { label: string; desc: string }> = {
   },
 };
 
-function Toggle({
-  checked,
-  onChange,
-  label,
-  desc,
-}: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  label: string;
-  desc?: string;
-}) {
-  return (
-    <View
-      style={{
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-        justifyContent: 'space-between',
-        gap: 12,
-        paddingVertical: 12,
-      }}
-    >
-      <View style={{ flex: 1 }}>
-        <Text style={{ fontSize: 14, fontWeight: '600', color: '#1a1a2e' }}>
-          {label}
-        </Text>
-        {desc && (
-          <Text style={{ fontSize: 12, color: '#888', marginTop: 2 }}>
-            {desc}
-          </Text>
-        )}
-      </View>
-      <Pressable
-        onPress={() => onChange(!checked)}
-        style={{
-          width: 44,
-          height: 24,
-          borderRadius: 12,
-          backgroundColor: checked ? '#8b5cf6' : '#d1d5db',
-          justifyContent: 'center',
-          paddingHorizontal: 2,
-          marginTop: 2,
-        }}
-      >
-        <View
-          style={{
-            width: 20,
-            height: 20,
-            borderRadius: 10,
-            backgroundColor: '#fff',
-            transform: [{ translateX: checked ? 20 : 0 }],
-          }}
-        />
-      </Pressable>
-    </View>
-  );
-}
-
-function Section({
+function SectionCard({
   title,
   children,
 }: {
   title: string;
   children: React.ReactNode;
 }) {
+  const theme = useTheme();
+  const c = theme.colors;
   return (
-    <View
-      style={{
-        backgroundColor: '#fff',
-        borderRadius: 14,
-        padding: 18,
-        marginBottom: 12,
-        marginHorizontal: 16,
-      }}
-    >
+    <View style={{ gap: 8 }}>
       <Text
         style={{
-          fontSize: 12,
-          fontWeight: '800',
-          color: '#1a1a2e',
-          textTransform: 'uppercase',
-          letterSpacing: 0.5,
-          marginBottom: 4,
+          ...M3Type.titleSmall,
+          color: c.primary,
+          paddingHorizontal: 4,
         }}
       >
         {title}
       </Text>
-      {children}
+      <View
+        style={{
+          backgroundColor: c.elevation.level1,
+          borderRadius: 16,
+          overflow: 'hidden',
+          borderWidth: 1,
+          borderColor: c.outlineVariant,
+        }}
+      >
+        {children}
+      </View>
+    </View>
+  );
+}
+
+function Row({
+  title,
+  desc,
+  trailing,
+  first,
+}: {
+  title: string;
+  desc?: string;
+  trailing?: React.ReactNode;
+  first?: boolean;
+}) {
+  const theme = useTheme();
+  const c = theme.colors;
+  return (
+    <View>
+      {!first && <View style={{ height: 1, backgroundColor: c.outlineVariant }} />}
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 14,
+          paddingHorizontal: 16,
+          paddingVertical: 14,
+        }}
+      >
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={{ ...M3Type.bodyLarge, color: c.onSurface }}>{title}</Text>
+          {desc && (
+            <Text
+              style={{
+                ...M3Type.bodyMedium,
+                color: c.onSurfaceVariant,
+                marginTop: 2,
+              }}
+            >
+              {desc}
+            </Text>
+          )}
+        </View>
+        {trailing}
+      </View>
+    </View>
+  );
+}
+
+function ThemePicker() {
+  const theme = useTheme();
+  const c = theme.colors;
+  const { themeName, setThemeName } = useAppTheme();
+  const options: { key: ThemeName; label: string }[] = [
+    { key: 'focus', label: 'Focus' },
+    { key: 'momentum', label: 'Momentum' },
+  ];
+  return (
+    <View style={{ flexDirection: 'row', gap: 8 }}>
+      {options.map(({ key, label }) => {
+        const active = themeName === key;
+        const swatch = themes[key].colors;
+        return (
+          <Pressable
+            key={key}
+            onPress={() => setThemeName(key)}
+            accessibilityRole="button"
+            accessibilityLabel={`${label} theme`}
+            accessibilityState={{ selected: active }}
+            style={{
+              flex: 1,
+              borderRadius: 12,
+              borderWidth: 2,
+              borderColor: active ? c.primary : c.outlineVariant,
+              backgroundColor: swatch.background,
+              padding: 12,
+              gap: 8,
+            }}
+          >
+            <View style={{ flexDirection: 'row', gap: 4 }}>
+              <View
+                style={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: 6,
+                  backgroundColor: swatch.primary,
+                }}
+              />
+              <View
+                style={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: 6,
+                  backgroundColor: swatch.primaryContainer,
+                }}
+              />
+              <View
+                style={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: 6,
+                  backgroundColor: swatch.tertiaryContainer,
+                }}
+              />
+            </View>
+            <Text
+              style={{
+                ...M3Type.labelLarge,
+                color: swatch.onBackground,
+              }}
+            >
+              {label}
+            </Text>
+          </Pressable>
+        );
+      })}
     </View>
   );
 }
 
 export default function SettingsScreen() {
+  const theme = useTheme();
+  const c = theme.colors;
   const prefs = useStore((s) => s.prefs);
   const rules = useStore((s) => s.rules);
   const updatePrefs = useStore((s) => s.updatePrefs);
@@ -134,7 +200,9 @@ export default function SettingsScreen() {
   if (!prefs) {
     return (
       <View style={{ alignItems: 'center', paddingVertical: 40 }}>
-        <Text style={{ color: '#aaa', fontSize: 13 }}>Loading settings…</Text>
+        <Text style={{ ...M3Type.bodyMedium, color: c.onSurfaceVariant }}>
+          Loading settings…
+        </Text>
       </View>
     );
   }
@@ -143,128 +211,184 @@ export default function SettingsScreen() {
     updatePrefs({ [key]: value } as Partial<UserPrefs>);
 
   return (
-    <ScrollView contentContainerStyle={{ paddingVertical: 12, paddingBottom: 80 }}>
-      <Section title="Notifications">
-        <Toggle
-          label="In-app notifications"
-          desc="🔔 bell with realtime updates."
-          checked={prefs.notify_in_app}
-          onChange={(v) => setPref('notify_in_app', v)}
-        />
-        <Toggle
-          label="Push notifications"
-          desc="Alerts on your device when the app is closed."
-          checked={prefs.notify_push}
-          onChange={(v) => setPref('notify_push', v)}
-        />
-        <Toggle
-          label="Email notifications"
-          desc="Email the same updates to your account address."
-          checked={prefs.notify_email}
-          onChange={(v) => setPref('notify_email', v)}
-        />
-      </Section>
-
-      <Section title="Daily summary">
-        <Toggle
-          label="Send me a morning briefing"
-          desc="A Claude-written recap of yesterday + today's priorities."
-          checked={prefs.daily_summary_enabled}
-          onChange={(v) => setPref('daily_summary_enabled', v)}
-        />
-        <View
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 12,
-            paddingVertical: 10,
-            borderTopWidth: 1,
-            borderTopColor: '#eee',
-            marginTop: 6,
-          }}
-        >
-          <Text style={{ fontSize: 13, color: '#555', flex: 1 }}>
-            Timezone
+    <ScrollView
+      contentContainerStyle={{
+        paddingHorizontal: 16,
+        paddingTop: 12,
+        paddingBottom: 140,
+        gap: 20,
+      }}
+    >
+      <SectionCard title="Appearance">
+        <View style={{ padding: 16, gap: 8 }}>
+          <Text style={{ ...M3Type.bodyMedium, color: c.onSurfaceVariant }}>
+            Two curated directions.
           </Text>
-          <TextInput
-            value={prefs.timezone}
-            onChangeText={(v) => setPref('timezone', v)}
-            placeholder="Asia/Kolkata"
-            style={{
-              borderWidth: 1.5,
-              borderColor: '#e5e7eb',
-              borderRadius: 8,
-              paddingHorizontal: 10,
-              paddingVertical: 6,
-              fontSize: 13,
-              minWidth: 160,
-              textAlign: 'right',
-            }}
-          />
+          <ThemePicker />
         </View>
-      </Section>
+      </SectionCard>
 
-      <Section title="Automations">
+      <SectionCard title="Notifications">
+        <Row
+          first
+          title="In-app"
+          desc="Realtime updates inside the app."
+          trailing={
+            <M3Switch
+              value={prefs.notify_in_app}
+              onValueChange={(v) => setPref('notify_in_app', v)}
+              accessibilityLabel="In-app notifications"
+            />
+          }
+        />
+        <Row
+          title="Push"
+          desc="Alerts on your device when the app is closed."
+          trailing={
+            <M3Switch
+              value={prefs.notify_push}
+              onValueChange={(v) => setPref('notify_push', v)}
+              accessibilityLabel="Push notifications"
+            />
+          }
+        />
+        <Row
+          title="Email"
+          desc="Mirror the same updates to your inbox."
+          trailing={
+            <M3Switch
+              value={prefs.notify_email}
+              onValueChange={(v) => setPref('notify_email', v)}
+              accessibilityLabel="Email notifications"
+            />
+          }
+        />
+      </SectionCard>
+
+      <SectionCard title="Briefings">
+        <Row
+          first
+          title="Morning briefing"
+          desc="A short AI recap of yesterday and today's priorities."
+          trailing={
+            <M3Switch
+              value={prefs.daily_summary_enabled}
+              onValueChange={(v) => setPref('daily_summary_enabled', v)}
+              accessibilityLabel="Morning briefing"
+            />
+          }
+        />
+        <Row
+          title="Timezone"
+          trailing={
+            <TextInput
+              value={prefs.timezone}
+              onChangeText={(v) => setPref('timezone', v)}
+              placeholder="Asia/Kolkata"
+              placeholderTextColor={c.onSurfaceVariant}
+              style={{
+                ...M3Type.bodyMedium,
+                color: c.onSurface,
+                fontVariant: ['tabular-nums'],
+                minWidth: 140,
+                textAlign: 'right',
+              }}
+            />
+          }
+        />
+      </SectionCard>
+
+      <SectionCard title="Automations">
         {rules.length === 0 ? (
-          <Text style={{ fontSize: 13, color: '#888' }}>Loading rules…</Text>
+          <View style={{ padding: 16 }}>
+            <Text style={{ ...M3Type.bodyMedium, color: c.onSurfaceVariant }}>
+              Loading rules…
+            </Text>
+          </View>
         ) : (
           rules
             .filter((r) => RULE_LABELS[r.rule_key])
-            .map((r) => {
+            .map((r, i) => {
               const meta = RULE_LABELS[r.rule_key];
               return (
-                <Toggle
+                <Row
                   key={r.rule_key}
-                  label={meta.label}
+                  first={i === 0}
+                  title={meta.label}
                   desc={meta.desc}
-                  checked={r.is_enabled}
-                  onChange={(v) => toggleRule(r.rule_key, v)}
+                  trailing={
+                    <M3Switch
+                      value={r.is_enabled}
+                      onValueChange={(v) => toggleRule(r.rule_key, v)}
+                      accessibilityLabel={meta.label}
+                    />
+                  }
                 />
               );
             })
         )}
-      </Section>
+      </SectionCard>
 
-      <Section title="AI suggestions">
-        <Toggle
-          label="Auto-generate subtasks"
+      <SectionCard title="AI suggestions">
+        <Row
+          first
+          title="Auto-generate subtasks"
           desc="Suggest subtasks for new tasks automatically."
-          checked={prefs.ai_auto_subtasks}
-          onChange={(v) => setPref('ai_auto_subtasks', v)}
+          trailing={
+            <M3Switch
+              value={prefs.ai_auto_subtasks}
+              onValueChange={(v) => setPref('ai_auto_subtasks', v)}
+              accessibilityLabel="Auto-generate subtasks"
+            />
+          }
         />
-        <Toggle
-          label="Auto-suggest tags"
+        <Row
+          title="Auto-suggest tags"
           desc="Match task titles against existing tags."
-          checked={prefs.ai_auto_tags}
-          onChange={(v) => setPref('ai_auto_tags', v)}
+          trailing={
+            <M3Switch
+              value={prefs.ai_auto_tags}
+              onValueChange={(v) => setPref('ai_auto_tags', v)}
+              accessibilityLabel="Auto-suggest tags"
+            />
+          }
         />
-        <Toggle
-          label="Auto-suggest priority"
+        <Row
+          title="Auto-suggest priority"
           desc="Infer priority from task content."
-          checked={prefs.ai_auto_priority}
-          onChange={(v) => setPref('ai_auto_priority', v)}
+          trailing={
+            <M3Switch
+              value={prefs.ai_auto_priority}
+              onValueChange={(v) => setPref('ai_auto_priority', v)}
+              accessibilityLabel="Auto-suggest priority"
+            />
+          }
         />
-      </Section>
+      </SectionCard>
 
-      <Section title="Account">
-        <Pressable
-          onPress={() => supabase.auth.signOut()}
-          style={{
-            paddingVertical: 10,
-            paddingHorizontal: 14,
-            borderRadius: 8,
-            borderWidth: 1.5,
-            borderColor: '#fecaca',
-            backgroundColor: '#fef2f2',
-            alignSelf: 'flex-start',
-            marginTop: 4,
-          }}
-        >
-          <Text style={{ color: '#dc2626', fontSize: 13, fontWeight: '700' }}>
-            Sign out
-          </Text>
-        </Pressable>
-      </Section>
+      <SectionCard title="Account">
+        <View style={{ padding: 16 }}>
+          <Pressable
+            onPress={() => supabase.auth.signOut()}
+            accessibilityRole="button"
+            style={({ pressed }) => ({
+              height: 40,
+              paddingHorizontal: 16,
+              borderRadius: 20,
+              borderWidth: 1,
+              borderColor: c.error,
+              alignSelf: 'flex-start',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: pressed ? c.errorContainer : 'transparent',
+            })}
+          >
+            <Text style={{ ...M3Type.labelLarge, color: c.error }}>
+              Sign out
+            </Text>
+          </Pressable>
+        </View>
+      </SectionCard>
     </ScrollView>
   );
 }

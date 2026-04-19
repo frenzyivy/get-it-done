@@ -56,3 +56,7 @@ coverage/
 # Temp
 .tmp/
 tmp/
+
+.claude/
+Get-it-done/
+Get-it-done.zip

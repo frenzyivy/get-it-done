@@ -1,31 +1,41 @@
 import { useEffect, useState } from 'react';
 import { useStore } from './store';
 
-// Mirror of the web hook. Identical logic — ticks once a second, persists to
-// the DB every 30s so a crash mid-session doesn't lose progress.
-export function useLiveTimer(): number {
-  const sessionId = useStore((s) => s.activeSession?.id ?? null);
-  const startedAt = useStore((s) => s.activeSession?.started_at ?? null);
-  const persist = useStore((s) => s.persistActiveSessionDuration);
-  const [elapsed, setElapsed] = useState(0);
+// New-spec-1 Feature 4 — multi-timer support. Returns a map of sessionId →
+// elapsed seconds. Ticks once per second. Persists every 30s.
+export function useLiveTimers(): Record<string, number> {
+  const sessions = useStore((s) => s.activeSessions);
+  const persist = useStore((s) => s.persistActiveSessionDurations);
+  const [, setTick] = useState(0);
 
   useEffect(() => {
-    if (!sessionId || !startedAt) {
-      setElapsed(0);
-      return;
-    }
-    const startMs = new Date(startedAt).getTime();
-    const tick = () => {
-      setElapsed(Math.max(0, Math.floor((Date.now() - startMs) / 1000)));
-    };
-    tick();
-    const tickId = setInterval(tick, 1000);
+    if (sessions.length === 0) return;
+    const tickId = setInterval(() => setTick((t) => t + 1), 1000);
     const persistId = setInterval(() => void persist(), 30_000);
     return () => {
       clearInterval(tickId);
       clearInterval(persistId);
     };
-  }, [sessionId, startedAt, persist]);
+  }, [sessions.length, persist]);
 
-  return elapsed;
+  const out: Record<string, number> = {};
+  for (const s of sessions) {
+    const startMs = new Date(s.started_at).getTime();
+    out[s.id] = Math.max(0, Math.floor((Date.now() - startMs) / 1000));
+  }
+  return out;
+}
+
+export function useSessionElapsed(sessionId: string | null | undefined): number {
+  const map = useLiveTimers();
+  return sessionId ? map[sessionId] ?? 0 : 0;
+}
+
+// Back-compat: returns the elapsed of the most-recent active session.
+export function useLiveTimer(): number {
+  const sessions = useStore((s) => s.activeSessions);
+  const map = useLiveTimers();
+  if (sessions.length === 0) return 0;
+  const latest = sessions[sessions.length - 1];
+  return map[latest.id] ?? 0;
 }

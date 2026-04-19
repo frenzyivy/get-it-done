@@ -3,6 +3,9 @@ import type { Status } from '@/types';
 
 export interface UIContextValue {
   openAddTask: (status?: Status) => void;
+  openEditTask: (taskId: string) => void;
+  // "Today's 5" drawer — opened from DailyGoalBar tap.
+  openTodayFive: () => void;
 }
 
 const UIContext = createContext<UIContextValue | null>(null);

@@ -23,12 +23,16 @@ export interface TaskType {
   id: string;
   user_id: string;
   title: string;
+  description: string | null;
   status: Status;
   priority: Priority;
   due_date: string | null;
   total_time_seconds: number;
   estimated_seconds: number | null;
   sort_order: number;
+  allow_alarms: boolean;
+  // "Today's 5" planning date.
+  planned_for_date: string | null;
   tag_ids: string[];
   subtasks: SubtaskType[];
   sessions: TimeSession[];
@@ -82,6 +86,10 @@ export interface UserPrefs {
   expo_push_token: string | null;
   daily_summary_enabled: boolean;
   daily_summary_hour: number;
+  // New-spec-1 Feature 5 — focus session settings
+  announce_focus_sessions: boolean;
+  focus_announce_phrase: string;
+  default_timer_mode: FocusMode;
 }
 
 export interface AutomationRule {
@@ -103,9 +111,23 @@ export interface UserProfileV2 {
   work_day_end: string;
   pomodoro_work_minutes: number;
   pomodoro_break_minutes: number;
+  last_rollover_prompt_date: string | null;
 }
 
-export type TrackedMode = 'free' | 'pomodoro_25_5' | 'pomodoro_50_10';
+// New-spec-1 Feature 5 — focus mode levels.
+export type FocusMode = 'open' | 'call_focus' | 'app_focus' | 'strict';
+
+export type TrackedMode =
+  | 'free'
+  | 'pomodoro_25_5'
+  | 'pomodoro_50_10'
+  | FocusMode;
+
+export interface DriftEvent {
+  started_at: string;
+  ended_at: string;
+  duration_seconds: number;
+}
 
 export interface TrackedSession {
   id: string;
@@ -118,6 +140,7 @@ export interface TrackedSession {
   duration_seconds: number | null;
   mode: TrackedMode;
   was_paused: boolean;
+  drift_events: DriftEvent[];
 }
 
 export interface PlannedBlock {

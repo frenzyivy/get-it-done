@@ -46,3 +46,20 @@ export function isToday(iso: string | null | undefined): boolean {
     d.getDate() === n.getDate()
   );
 }
+
+export function toLocalDateISO(d: Date = new Date()): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+export function todayISO(): string {
+  return toLocalDateISO(new Date());
+}
+
+export function tomorrowISO(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return toLocalDateISO(d);
+}

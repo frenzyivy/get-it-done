@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Stack, useRouter, useSegments } from 'expo-router';
+import { PaperProvider } from 'react-native-paper';
 import {
   useFonts,
   DMSans_400Regular,
@@ -14,6 +15,7 @@ import {
 } from '@expo-google-fonts/dm-sans';
 import { supabase } from '@/lib/supabase';
 import { useStore } from '@/lib/store';
+import { ThemeProvider, useAppTheme } from '@/lib/theme-context';
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
@@ -24,6 +26,15 @@ export default function RootLayout() {
     DMSans_800ExtraBold,
   });
 
+  return (
+    <ThemeProvider>
+      <ThemedRoot fontsLoaded={fontsLoaded} />
+    </ThemeProvider>
+  );
+}
+
+function ThemedRoot({ fontsLoaded }: { fontsLoaded: boolean }) {
+  const { theme } = useAppTheme();
   const [authReady, setAuthReady] = useState(false);
   const setUserId = useStore((s) => s.setUserId);
   const fetchAll = useStore((s) => s.fetchAll);
@@ -59,25 +70,29 @@ export default function RootLayout() {
 
   if (!fontsLoaded || !authReady) {
     return (
-      <View
-        style={{
-          flex: 1,
-          justifyContent: 'center',
-          alignItems: 'center',
-          backgroundColor: '#f8f7ff',
-        }}
-      >
-        <ActivityIndicator color="#8b5cf6" />
-      </View>
+      <PaperProvider theme={theme}>
+        <View
+          style={{
+            flex: 1,
+            justifyContent: 'center',
+            alignItems: 'center',
+            backgroundColor: theme.colors.background,
+          }}
+        >
+          <ActivityIndicator color={theme.colors.primary} />
+        </View>
+      </PaperProvider>
     );
   }
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="login" />
-        <Stack.Screen name="(tabs)" />
-      </Stack>
-    </GestureHandlerRootView>
+    <PaperProvider theme={theme}>
+      <GestureHandlerRootView style={{ flex: 1, backgroundColor: theme.colors.background }}>
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="login" />
+          <Stack.Screen name="(tabs)" />
+        </Stack>
+      </GestureHandlerRootView>
+    </PaperProvider>
   );
 }

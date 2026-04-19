@@ -1,38 +1,71 @@
 import { useCallback, useEffect, useRef } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Tabs } from 'expo-router';
+import { Tabs, useSegments } from 'expo-router';
+import { useTheme } from 'react-native-paper';
 import { useStore } from '@/lib/store';
 import { UIProvider } from '@/lib/ui-context';
-import { NowTrackingBar } from '@/components/NowTrackingBar';
-import { DailyGoalBar } from '@/components/DailyGoalBar';
+import { TrackingCard } from '@/components/TrackingCard';
+import { TopAppBar } from '@/components/TopAppBar';
+import { M3BottomNav } from '@/components/M3BottomNav';
+import { FAB } from '@/components/FAB';
 import { TagManagerSheet, type TagManagerHandle } from '@/components/TagManagerSheet';
 import { AddTaskSheet, type AddTaskSheetHandle } from '@/components/AddTaskSheet';
 import {
   NotificationSheet,
   type NotificationSheetHandle,
 } from '@/components/NotificationSheet';
+import {
+  EditTaskSheet,
+  type EditTaskSheetHandle,
+} from '@/components/EditTaskSheet';
+import { FocusModeScreen } from '@/components/FocusModeScreen';
+import {
+  TodayFiveSheet,
+  type TodayFiveSheetHandle,
+} from '@/components/TodayFiveSheet';
+import { RolloverPromptSheet } from '@/components/RolloverPromptSheet';
 import { registerForPushNotifications } from '@/lib/push-notifications';
 import type { Status } from '@/types';
 
+const TITLES: Record<string, { title: string; subtitle?: string }> = {
+  index: { title: 'Board' },
+  list: { title: 'Today' },
+  schedule: { title: 'Day' },
+  timeline: { title: 'Insights' },
+  settings: { title: 'Settings' },
+};
+
 export default function TabsLayout() {
-  const tagCount = useStore((s) => s.tags.length);
+  const theme = useTheme();
+  const segments = useSegments();
   const userId = useStore((s) => s.userId);
   const prefs = useStore((s) => s.prefs);
   const unreadCount = useStore(
     (s) => s.notifications.filter((n) => !n.read_at).length,
   );
+
+  // Last segment inside the (tabs) group tells us which screen is active.
+  // When on the index screen, expo-router reports the group name only.
+  const lastSeg = segments[segments.length - 1] ?? 'index';
+  const routeKey = lastSeg === '(tabs)' ? 'index' : lastSeg;
+  const header = TITLES[routeKey] ?? TITLES.index;
   const tagSheetRef = useRef<TagManagerHandle>(null);
   const addSheetRef = useRef<AddTaskSheetHandle>(null);
   const notifSheetRef = useRef<NotificationSheetHandle>(null);
+  const editSheetRef = useRef<EditTaskSheetHandle>(null);
+  const todayFiveSheetRef = useRef<TodayFiveSheetHandle>(null);
 
   const openAddTask = useCallback((status: Status = 'todo') => {
     addSheetRef.current?.open(status);
   }, []);
+  const openEditTask = useCallback((taskId: string) => {
+    editSheetRef.current?.open(taskId);
+  }, []);
+  const openTodayFive = useCallback(() => {
+    todayFiveSheetRef.current?.open();
+  }, []);
 
-  // Register for push once the user is authed and they haven't opted out.
-  // If they have no token yet (or an old one), update it — PLAN.md §9 says
-  // refresh on every launch.
   useEffect(() => {
     if (!userId || !prefs) return;
     if (!prefs.notify_push) return;
@@ -40,149 +73,54 @@ export default function TabsLayout() {
   }, [userId, prefs]);
 
   return (
-    <UIProvider value={{ openAddTask }}>
-      <SafeAreaView style={{ flex: 1, backgroundColor: '#f8f7ff' }} edges={['top']}>
-        <NowTrackingBar />
-        <View
-          style={{
-            paddingHorizontal: 16,
-            paddingTop: 10,
-            paddingBottom: 8,
-            flexDirection: 'row',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-          }}
-        >
-          <Text style={{ fontSize: 22, fontWeight: '800', color: '#1a1a2e' }}>
-            <Text style={{ color: '#8b5cf6' }}>⚡ </Text>Get-it-done
-          </Text>
-          <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-            <Pressable
-              onPress={() => notifSheetRef.current?.open()}
-              hitSlop={6}
-              style={{
-                width: 36,
-                height: 36,
-                borderRadius: 8,
-                borderWidth: 1.5,
-                borderColor: '#e5e7eb',
-                backgroundColor: '#fff',
-                alignItems: 'center',
-                justifyContent: 'center',
-                position: 'relative',
-              }}
-            >
-              <Text style={{ fontSize: 16 }}>🔔</Text>
-              {unreadCount > 0 && (
-                <View
-                  style={{
-                    position: 'absolute',
-                    top: -4,
-                    right: -4,
-                    minWidth: 18,
-                    height: 18,
-                    paddingHorizontal: 4,
-                    borderRadius: 9,
-                    backgroundColor: '#dc2626',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>
-                    {unreadCount > 99 ? '99+' : unreadCount}
-                  </Text>
-                </View>
-              )}
-            </Pressable>
-            <Pressable
-              onPress={() => tagSheetRef.current?.open()}
-              style={{
-                paddingHorizontal: 10,
-                paddingVertical: 6,
-                borderRadius: 8,
-                borderWidth: 1.5,
-                borderColor: '#e5e7eb',
-                backgroundColor: '#fff',
-              }}
-            >
-              <Text style={{ fontSize: 12, fontWeight: '700', color: '#666' }}>
-                ⚙ Tags ({tagCount})
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-        <DailyGoalBar />
+    <UIProvider value={{ openAddTask, openEditTask, openTodayFive }}>
+      <SafeAreaView
+        style={{ flex: 1, backgroundColor: theme.colors.background }}
+        edges={['top']}
+      >
+        <TopAppBar
+          title={header.title}
+          subtitle={header.subtitle}
+          unreadCount={unreadCount}
+          onOpenNotifications={() => notifSheetRef.current?.open()}
+          onOpenOverflow={() => tagSheetRef.current?.open()}
+        />
+        <TrackingCard />
 
-        <Tabs
-          screenOptions={{
-            headerShown: false,
-            tabBarActiveTintColor: '#8b5cf6',
-            tabBarInactiveTintColor: '#888',
-            tabBarStyle: {
-              borderTopWidth: 1,
-              borderTopColor: '#eee',
-              backgroundColor: '#fff',
-              height: 58,
-              paddingTop: 6,
-              paddingBottom: 8,
-            },
-            tabBarLabelStyle: { fontSize: 12, fontWeight: '700' },
-          }}
-        >
-          <Tabs.Screen
-            name="index"
-            options={{
-              title: 'Board',
-              tabBarIcon: ({ color }) => (
-                <Text style={{ color, fontSize: 20 }}>▤</Text>
-              ),
-            }}
-            listeners={{ focus: () => useStore.getState().setView('kanban') }}
-          />
-          <Tabs.Screen
-            name="list"
-            options={{
-              title: 'List',
-              tabBarIcon: ({ color }) => (
-                <Text style={{ color, fontSize: 20 }}>☰</Text>
-              ),
-            }}
-            listeners={{ focus: () => useStore.getState().setView('list') }}
-          />
-          <Tabs.Screen
-            name="schedule"
-            options={{
-              title: 'Schedule',
-              tabBarIcon: ({ color }) => (
-                <Text style={{ color, fontSize: 18 }}>⏱</Text>
-              ),
-            }}
-            listeners={{ focus: () => useStore.getState().setView('schedule') }}
-          />
-          <Tabs.Screen
-            name="timeline"
-            options={{
-              title: 'Timeline',
-              tabBarIcon: ({ color }) => (
-                <Text style={{ color, fontSize: 18 }}>◧</Text>
-              ),
-            }}
-            listeners={{ focus: () => useStore.getState().setView('timeline') }}
-          />
-          <Tabs.Screen
-            name="settings"
-            options={{
-              title: 'Settings',
-              tabBarIcon: ({ color }) => (
-                <Text style={{ color, fontSize: 20 }}>⚙</Text>
-              ),
-            }}
-          />
-        </Tabs>
+        <View style={{ flex: 1 }}>
+          <Tabs
+            screenOptions={{ headerShown: false }}
+            tabBar={(props) => <M3BottomNav {...props} />}
+          >
+            <Tabs.Screen
+              name="index"
+              listeners={{ focus: () => useStore.getState().setView('kanban') }}
+            />
+            <Tabs.Screen
+              name="list"
+              listeners={{ focus: () => useStore.getState().setView('list') }}
+            />
+            <Tabs.Screen
+              name="schedule"
+              listeners={{ focus: () => useStore.getState().setView('schedule') }}
+            />
+            <Tabs.Screen
+              name="timeline"
+              listeners={{ focus: () => useStore.getState().setView('timeline') }}
+            />
+            <Tabs.Screen name="settings" />
+          </Tabs>
+        </View>
+
+        <FAB onPress={() => openAddTask('todo')} />
 
         <TagManagerSheet ref={tagSheetRef} />
         <AddTaskSheet ref={addSheetRef} />
         <NotificationSheet ref={notifSheetRef} />
+        <EditTaskSheet ref={editSheetRef} />
+        <TodayFiveSheet ref={todayFiveSheetRef} />
+        <RolloverPromptSheet />
+        <FocusModeScreen />
       </SafeAreaView>
     </UIProvider>
   );

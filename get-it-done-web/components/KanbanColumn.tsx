@@ -69,6 +69,11 @@ export function KanbanColumn({ col, tasks }: Props) {
         {tasks.map((t) => (
           <DraggableCard key={t.id} task={t} />
         ))}
+        {tasks.length === 0 && (
+          <p className="text-center text-[12px] text-[#9ca3af] py-2">
+            No tasks yet
+          </p>
+        )}
         <AddTaskForm defaultStatus={col.id} />
       </div>
     </div>

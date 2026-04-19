@@ -5,6 +5,7 @@ import { useStore } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 import { fmtShort } from '@/lib/utils';
 import { DailySummaryCard } from './DailySummaryCard';
+import { TimelineGantt } from './TimelineGantt';
 import type { TrackedSession } from '@/types';
 
 // v2 spec §9 — the "honest mirror".
@@ -31,7 +32,7 @@ export function TimelineView() {
   const tasks = useStore((s) => s.tasks);
   const plannedBlocks = useStore((s) => s.plannedBlocks);
   const fetchPlannedBlocks = useStore((s) => s.fetchPlannedBlocks);
-  const activeSession = useStore((s) => s.activeSession);
+  const activeSessions = useStore((s) => s.activeSessions);
 
   const dayStart = useMemo(() => {
     const d = new Date();
@@ -60,6 +61,14 @@ export function TimelineView() {
     })();
   }, [userId, dayStart, dayEnd]);
 
+  // Sampled in state and ticked once a minute so the "tracking" status check
+  // stays current without calling Date.now() during render (React Compiler).
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
   const rows: RowSummary[] = useMemo(() => {
     return plannedBlocks.map((pb) => {
       const taskTitle = tasks.find((t) => t.id === pb.task_id)?.title ?? 'Untitled';
@@ -67,11 +76,12 @@ export function TimelineView() {
       const actual = matched.reduce((sum, s) => sum + (s.duration_seconds ?? 0), 0);
 
       let status: RowSummary['status'] = 'skipped';
-      const blockEnd = new Date(pb.start_at).getTime() + pb.duration_seconds * 1000;
+      const blockStart = new Date(pb.start_at).getTime();
+      const blockEnd = blockStart + pb.duration_seconds * 1000;
       if (
-        activeSession?.planned_block_id === pb.id ||
-        (Date.now() >= new Date(pb.start_at).getTime() &&
-          Date.now() < blockEnd &&
+        activeSessions.some((s) => s.planned_block_id === pb.id) ||
+        (nowMs >= blockStart &&
+          nowMs < blockEnd &&
           matched.some((s) => !s.ended_at))
       ) {
         status = 'tracking';
@@ -95,7 +105,7 @@ export function TimelineView() {
         status,
       };
     });
-  }, [plannedBlocks, sessions, tasks, activeSession]);
+  }, [plannedBlocks, sessions, tasks, activeSessions, nowMs]);
 
   const unplanned = useMemo(
     () => sessions.filter((s) => !s.planned_block_id && s.ended_at),
@@ -138,9 +148,22 @@ export function TimelineView() {
     URL.revokeObjectURL(url);
   };
 
+  // Highlight a session block on the Gantt when its row in the off-plan list is
+  // clicked. Cleared on second click or via the "Clear highlight" button.
+  const [highlightSessionId, setHighlightSessionId] = useState<string | null>(null);
+
   return (
     <div className="flex flex-col gap-4">
       <DailySummaryCard />
+
+      {/* Feature 1 — visual day timeline */}
+      <TimelineGantt
+        dayStart={dayStart}
+        plannedBlocks={plannedBlocks}
+        sessions={sessions}
+        highlightSessionId={highlightSessionId}
+        onHighlightClear={() => setHighlightSessionId(null)}
+      />
 
       {/* Honest score card */}
       <div className="grid grid-cols-3 gap-3">
@@ -153,18 +176,8 @@ export function TimelineView() {
         <ScoreTile label="Drifted" value={fmtShort(drifted)} color="#dc2626" />
       </div>
 
-      {/* Legend + export */}
-      <div className="flex items-center justify-between">
-        <div className="flex gap-4 text-[11px] text-[#888]">
-          <span>
-            <span className="inline-block w-4 h-[3px] rounded bg-[#8b5cf6]/40 mr-1 align-middle" />
-            Planned
-          </span>
-          <span>
-            <span className="inline-block w-4 h-[8px] rounded bg-[#8b5cf6] mr-1 align-middle" />
-            Actual
-          </span>
-        </div>
+      {/* Export */}
+      <div className="flex items-center justify-end">
         <button
           onClick={exportCsv}
           disabled={rows.length === 0}
@@ -174,19 +187,16 @@ export function TimelineView() {
         </button>
       </div>
 
-      {/* Rows */}
-      <div className="flex flex-col gap-3">
-        {rows.length === 0 && (
-          <div className="text-center py-10 text-[#aaa] text-sm">
-            No data for this day. Start tracking to see your plan vs reality.
-          </div>
-        )}
-        {rows.map((r) => (
-          <PlannedVsActualRow key={r.blockId} row={r} />
-        ))}
-      </div>
+      {/* Per-block rows (kept from the previous view — still useful as a chronological log) */}
+      {rows.length > 0 && (
+        <div className="flex flex-col gap-3">
+          {rows.map((r) => (
+            <PlannedVsActualRow key={r.blockId} row={r} />
+          ))}
+        </div>
+      )}
 
-      {/* Unplanned section */}
+      {/* Unplanned section — rows are clickable to highlight on the Gantt above */}
       {unplanned.length > 0 && (
         <div className="mt-4">
           <div className="text-[11px] font-extrabold uppercase tracking-[0.5px] text-[#888] mb-2">
@@ -197,10 +207,18 @@ export function TimelineView() {
           <div className="flex flex-col gap-2">
             {unplanned.map((s) => {
               const task = tasks.find((t) => t.id === s.task_id);
+              const isHi = highlightSessionId === s.id;
               return (
-                <div
+                <button
                   key={s.id}
-                  className="bg-white rounded-lg px-3 py-2 shadow-[0_1px_3px_rgba(0,0,0,0.05)] flex justify-between items-center"
+                  onClick={() =>
+                    setHighlightSessionId((prev) => (prev === s.id ? null : s.id))
+                  }
+                  className="bg-white rounded-lg px-3 py-2 shadow-[0_1px_3px_rgba(0,0,0,0.05)] flex justify-between items-center text-left border-0 cursor-pointer transition-all"
+                  style={{
+                    outline: isHi ? '2px solid #f59e0b' : 'none',
+                    outlineOffset: 2,
+                  }}
                 >
                   <span className="text-[13px] text-[#1a1a2e]">
                     {task?.title ?? 'Deleted task'}
@@ -208,7 +226,7 @@ export function TimelineView() {
                   <span className="text-[12px] font-bold text-[#f59e0b]">
                     {fmtShort(s.duration_seconds ?? 0)}
                   </span>
-                </div>
+                </button>
               );
             })}
           </div>

@@ -4,21 +4,33 @@ import { useState } from 'react';
 import { PRIORITIES } from '@/lib/constants';
 import { useStore } from '@/lib/store';
 import { TagPicker } from './TagPicker';
+import { AiSuggestionPanel } from './AiSuggestionPanel';
 import type { Priority, Status } from '@/types';
 
 interface Props {
   defaultStatus?: Status;
+  forceOpen?: boolean;
+  onClose?: () => void;
+  hideTrigger?: boolean;
 }
 
-export function AddTaskForm({ defaultStatus = 'todo' }: Props) {
-  const [open, setOpen] = useState(false);
+export function AddTaskForm({
+  defaultStatus = 'todo',
+  forceOpen,
+  onClose,
+  hideTrigger,
+}: Props) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = forceOpen ?? internalOpen;
   const [title, setTitle] = useState('');
   const [priority, setPriority] = useState<Priority>('medium');
   const [tagIds, setTagIds] = useState<string[]>([]);
   const [dueDate, setDueDate] = useState('');
   const [estimateMin, setEstimateMin] = useState<number | null>(null);
+  const [pendingSubtasks, setPendingSubtasks] = useState<string[]>([]);
   const tags = useStore((s) => s.tags);
   const addTask = useStore((s) => s.addTask);
+  const addSubtask = useStore((s) => s.addSubtask);
 
   const reset = () => {
     setTitle('');
@@ -26,12 +38,14 @@ export function AddTaskForm({ defaultStatus = 'todo' }: Props) {
     setTagIds([]);
     setDueDate('');
     setEstimateMin(null);
-    setOpen(false);
+    setPendingSubtasks([]);
+    setInternalOpen(false);
+    onClose?.();
   };
 
   const submit = async () => {
     if (!title.trim()) return;
-    await addTask({
+    const taskId = await addTask({
       title: title.trim(),
       priority,
       tag_ids: tagIds,
@@ -39,13 +53,19 @@ export function AddTaskForm({ defaultStatus = 'todo' }: Props) {
       status: defaultStatus,
       estimated_seconds: estimateMin ? estimateMin * 60 : null,
     });
+    if (taskId) {
+      for (const sub of pendingSubtasks) {
+        await addSubtask(taskId, sub);
+      }
+    }
     reset();
   };
 
   if (!open) {
+    if (hideTrigger) return null;
     return (
       <button
-        onClick={() => setOpen(true)}
+        onClick={() => setInternalOpen(true)}
         className="w-full px-[14px] py-[10px] rounded-xl cursor-pointer text-[#8b5cf6] font-bold text-[13px] transition-all"
         style={{
           background: 'rgba(139,92,246,0.06)',
@@ -122,6 +142,40 @@ export function AddTaskForm({ defaultStatus = 'todo' }: Props) {
           Create
         </button>
       </div>
+
+      {pendingSubtasks.length > 0 && (
+        <div className="mt-3 rounded-xl bg-[#f9fafb] p-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-[#6b7280]">
+            Will add {pendingSubtasks.length} subtask{pendingSubtasks.length === 1 ? '' : 's'}
+          </p>
+          <ul className="mt-1 space-y-1">
+            {pendingSubtasks.map((s, i) => (
+              <li key={i} className="flex items-center justify-between text-[13px] text-[#374151]">
+                <span>• {s}</span>
+                <button
+                  onClick={() =>
+                    setPendingSubtasks((prev) => prev.filter((_, j) => j !== i))
+                  }
+                  className="text-[11px] text-[#9ca3af] hover:text-[#ef4444]"
+                >
+                  remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <AiSuggestionPanel
+        taskTitle={title}
+        dueDate={dueDate || null}
+        selectedTagIds={tagIds}
+        onAcceptSubtasks={(titles) => setPendingSubtasks((prev) => [...prev, ...titles])}
+        onAcceptTags={(ids) =>
+          setTagIds((prev) => Array.from(new Set([...prev, ...ids])))
+        }
+        onAcceptEstimate={(seconds) => setEstimateMin(Math.round(seconds / 60))}
+      />
     </div>
   );
 }

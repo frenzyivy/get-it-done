@@ -1,27 +1,50 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
+import Svg, { Line, Path, Rect } from 'react-native-svg';
+import { useTheme } from 'react-native-paper';
 import { useStore } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
-import { fmtShort } from '@/lib/utils';
+import { type as M3Type } from '@/lib/theme';
 import { DailySummaryCard } from './DailySummaryCard';
 import type { TrackedSession } from '@/types';
 
 const DAY_MS = 24 * 3600 * 1000;
+const START_HOUR = 6;
+const END_HOUR = 22;
+const SHAPE_W = 320;
+const SHAPE_H = 70;
+const HOUR_SPAN = END_HOUR - START_HOUR;
 
-interface RowSummary {
-  blockId: string;
-  taskTitle: string;
-  plannedSeconds: number;
-  actualSeconds: number;
-  status: 'tracking' | 'on_time' | 'over' | 'under' | 'skipped';
+function fmtShortMono(sec: number): string {
+  if (!sec || sec <= 0) return '0m';
+  const m = Math.round(sec / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  const r = m % 60;
+  return r > 0 ? `${h}h ${r}m` : `${h}h`;
+}
+
+function fmtHHMM(iso: string): string {
+  const d = new Date(iso);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+// Colored dot hue via HSL — cheap substitute for oklch(0.6 0.14 hue) from spec.
+function hueColor(seed: string): string {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) % 360;
+  return `hsl(${h}, 60%, 55%)`;
 }
 
 export function TimelineView() {
+  const theme = useTheme();
+  const c = theme.colors;
+  const success = theme.dark ? '#6FE39B' : '#0F7A4B';
+
   const userId = useStore((s) => s.userId);
   const tasks = useStore((s) => s.tasks);
   const plannedBlocks = useStore((s) => s.plannedBlocks);
   const fetchPlannedBlocks = useStore((s) => s.fetchPlannedBlocks);
-  const activeSession = useStore((s) => s.activeSession);
 
   const dayStart = useMemo(() => {
     const d = new Date();
@@ -50,261 +73,359 @@ export function TimelineView() {
     })();
   }, [userId, dayStart, dayEnd]);
 
-  const rows: RowSummary[] = useMemo(() => {
-    return plannedBlocks.map((pb) => {
-      const taskTitle = tasks.find((t) => t.id === pb.task_id)?.title ?? 'Untitled';
-      const matched = sessions.filter((s) => s.planned_block_id === pb.id);
-      const actual = matched.reduce((sum, s) => sum + (s.duration_seconds ?? 0), 0);
-      let status: RowSummary['status'] = 'skipped';
-      if (
-        activeSession?.planned_block_id === pb.id ||
-        matched.some((s) => !s.ended_at)
-      ) {
-        status = 'tracking';
-      } else if (actual === 0) {
-        status = 'skipped';
-      } else if (
-        actual >= pb.duration_seconds * 0.9 &&
-        actual <= pb.duration_seconds * 1.1
-      ) {
-        status = 'on_time';
-      } else if (actual > pb.duration_seconds * 1.1) {
-        status = 'over';
-      } else {
-        status = 'under';
-      }
-      return {
-        blockId: pb.id,
-        taskTitle,
-        plannedSeconds: pb.duration_seconds,
-        actualSeconds: actual,
-        status,
-      };
-    });
-  }, [plannedBlocks, sessions, tasks, activeSession]);
-
-  const unplanned = sessions.filter((s) => !s.planned_block_id && s.ended_at);
-  const totalPlanned = rows.reduce((s, r) => s + r.plannedSeconds, 0);
-  const totalActual = rows.reduce((s, r) => s + r.actualSeconds, 0);
-  const saved = rows.reduce(
-    (s, r) => s + Math.max(0, r.plannedSeconds - r.actualSeconds),
+  const totalPlanned = plannedBlocks.reduce((s, b) => s + b.duration_seconds, 0);
+  const totalTracked = sessions.reduce(
+    (s, x) => s + (x.duration_seconds ?? 0),
     0,
   );
-  const drifted =
-    rows.reduce(
-      (s, r) => s + Math.max(0, r.actualSeconds - r.plannedSeconds),
-      0,
-    ) +
-    unplanned.reduce((s, u) => s + (u.duration_seconds ?? 0), 0);
+
+  const onPlanSec = sessions
+    .filter((s) => s.planned_block_id)
+    .reduce((sum, s) => sum + (s.duration_seconds ?? 0), 0);
+  const driftedSec = sessions
+    .filter((s) => !s.planned_block_id && s.ended_at)
+    .reduce((sum, s) => sum + (s.duration_seconds ?? 0), 0);
+  const savedSec = Math.max(0, totalPlanned - totalTracked);
   const onPlanPct =
-    totalPlanned > 0
-      ? Math.min(100, Math.round((totalActual / totalPlanned) * 100))
-      : 0;
+    totalPlanned > 0 ? Math.round((onPlanSec / totalPlanned) * 100) : 0;
+
+  const offPlan = sessions.filter((s) => !s.planned_block_id && s.ended_at);
+  const offPlanCount = offPlan.length;
+
+  const hourToX = (h: number) =>
+    Math.max(0, Math.min(SHAPE_W, ((h - START_HOUR) / HOUR_SPAN) * SHAPE_W));
+
+  // Planned envelope — a dashed outline path connecting each block's top.
+  const envelopePath = useMemo(() => {
+    if (plannedBlocks.length === 0) return '';
+    const sorted = [...plannedBlocks].sort(
+      (a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime(),
+    );
+    let d = '';
+    for (const b of sorted) {
+      const startH = new Date(b.start_at).getHours() + new Date(b.start_at).getMinutes() / 60;
+      const endH = startH + b.duration_seconds / 3600;
+      const x1 = hourToX(startH);
+      const x2 = hourToX(endH);
+      const top = SHAPE_H * 0.3;
+      d += `M ${x1} ${SHAPE_H - 2} L ${x1} ${top} L ${x2} ${top} L ${x2} ${SHAPE_H - 2} `;
+    }
+    return d.trim();
+  }, [plannedBlocks]);
 
   return (
-    <ScrollView
-      contentContainerStyle={{ padding: 16, paddingBottom: 120, gap: 12 }}
-    >
+    <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 140, gap: 16 }}>
       <DailySummaryCard />
 
-      {/* Score tiles */}
-      <View style={{ flexDirection: 'row', gap: 8 }}>
-        <ScoreTile
+      {/* 1 — Stat row card */}
+      <View
+        style={{
+          backgroundColor: c.elevation.level1,
+          borderRadius: 16,
+          padding: 16,
+          flexDirection: 'row',
+          borderWidth: 1,
+          borderColor: c.outlineVariant,
+        }}
+      >
+        <Stat
           label="On plan"
           value={`${onPlanPct}%`}
-          color={onPlanPct >= 80 ? '#10b981' : onPlanPct >= 50 ? '#f59e0b' : '#dc2626'}
+          color={c.onSurface}
+          labelColor={c.onSurfaceVariant}
         />
-        <ScoreTile label="Saved" value={fmtShort(saved)} color="#10b981" />
-        <ScoreTile label="Drifted" value={fmtShort(drifted)} color="#dc2626" />
+        <Divider color={c.outlineVariant} />
+        <Stat
+          label="Saved"
+          value={savedSec > 0 ? fmtShortMono(savedSec) : '—'}
+          color={savedSec > 0 ? c.onSurface : c.onSurfaceVariant}
+          labelColor={c.onSurfaceVariant}
+        />
+        <Divider color={c.outlineVariant} />
+        <Stat
+          label="Drifted"
+          value={driftedSec > 0 ? fmtShortMono(driftedSec) : '—'}
+          color={driftedSec > 0 ? c.tertiary : c.onSurfaceVariant}
+          labelColor={c.onSurfaceVariant}
+        />
       </View>
 
-      {rows.length === 0 && (
-        <View style={{ alignItems: 'center', paddingVertical: 30 }}>
-          <Text style={{ color: '#aaa', fontSize: 13, textAlign: 'center' }}>
-            No data for this day. Start tracking to see your plan vs reality.
+      {/* 2 — Day shape card */}
+      <View
+        style={{
+          backgroundColor: c.elevation.level1,
+          borderRadius: 16,
+          padding: 16,
+          borderWidth: 1,
+          borderColor: c.outlineVariant,
+        }}
+      >
+        <View
+          style={{
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            alignItems: 'baseline',
+            marginBottom: 10,
+          }}
+        >
+          <Text
+            style={{
+              ...M3Type.labelMedium,
+              color: c.onSurfaceVariant,
+              textTransform: 'uppercase',
+            }}
+          >
+            Day shape
           </Text>
+          <Text
+            style={{
+              ...M3Type.bodySmall,
+              color: c.onSurfaceVariant,
+              fontVariant: ['tabular-nums'],
+            }}
+          >
+            {String(START_HOUR).padStart(2, '0')} — {String(END_HOUR).padStart(2, '0')}
+          </Text>
+        </View>
+        <Svg
+          width="100%"
+          height={SHAPE_H}
+          viewBox={`0 0 ${SHAPE_W} ${SHAPE_H}`}
+          preserveAspectRatio="none"
+        >
+          {/* Hour gridlines */}
+          {Array.from({ length: HOUR_SPAN + 1 }).map((_, i) => (
+            <Line
+              key={i}
+              x1={(i / HOUR_SPAN) * SHAPE_W}
+              x2={(i / HOUR_SPAN) * SHAPE_W}
+              y1={0}
+              y2={SHAPE_H}
+              stroke={c.outlineVariant}
+              strokeWidth={1}
+            />
+          ))}
+          {/* Dashed planned envelope */}
+          {envelopePath !== '' && (
+            <Path
+              d={envelopePath}
+              fill="none"
+              stroke={c.outline}
+              strokeWidth={1.5}
+              strokeDasharray="2 2"
+            />
+          )}
+          {/* Actual bars — primary 70% opacity */}
+          {sessions.map((s) => {
+            if (!s.duration_seconds || !s.ended_at) return null;
+            const startDate = new Date(s.started_at);
+            const startH =
+              startDate.getHours() + startDate.getMinutes() / 60;
+            const endH = startH + s.duration_seconds / 3600;
+            const x = hourToX(startH);
+            const w = Math.max(2, hourToX(endH) - x);
+            const h = Math.min(SHAPE_H - 6, 10 + (s.duration_seconds / 1800) * 8);
+            return (
+              <Rect
+                key={s.id}
+                x={x}
+                y={SHAPE_H - h - 2}
+                width={w}
+                height={h}
+                rx={2}
+                fill={c.primary}
+                opacity={0.7}
+              />
+            );
+          })}
+        </Svg>
+      </View>
+
+      {/* 3 — Off-plan list */}
+      {offPlanCount > 0 && (
+        <View style={{ gap: 8 }}>
+          <View
+            style={{
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              paddingHorizontal: 4,
+            }}
+          >
+            <Text
+              style={{
+                ...M3Type.labelMedium,
+                color: c.onSurfaceVariant,
+                textTransform: 'uppercase',
+              }}
+            >
+              Off plan
+            </Text>
+            <Text
+              style={{
+                ...M3Type.labelMedium,
+                color: c.onSurfaceVariant,
+                fontVariant: ['tabular-nums'],
+              }}
+            >
+              {fmtShortMono(driftedSec)} · {offPlanCount}{' '}
+              {offPlanCount === 1 ? 'entry' : 'entries'}
+            </Text>
+          </View>
+
+          <View
+            style={{
+              backgroundColor: c.elevation.level1,
+              borderRadius: 16,
+              overflow: 'hidden',
+              borderWidth: 1,
+              borderColor: c.outlineVariant,
+            }}
+          >
+            {offPlan.map((s, i) => {
+              const task = tasks.find((t) => t.id === s.task_id);
+              const title = task?.title ?? 'Deleted task';
+              const dot = hueColor(task?.tag_ids[0] ?? title);
+              return (
+                <View key={s.id}>
+                  {i > 0 && (
+                    <View style={{ height: 1, backgroundColor: c.outlineVariant }} />
+                  )}
+                  <View
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      paddingHorizontal: 16,
+                      paddingVertical: 12,
+                      gap: 12,
+                    }}
+                  >
+                    <View
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 10,
+                      }}
+                    >
+                      <View
+                        style={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: 4,
+                          backgroundColor: dot,
+                        }}
+                      />
+                      <Text
+                        numberOfLines={1}
+                        style={{ ...M3Type.bodyLarge, color: c.onSurface, flex: 1 }}
+                      >
+                        {title}
+                      </Text>
+                    </View>
+                    <View
+                      style={{ flexDirection: 'row', alignItems: 'baseline', gap: 12 }}
+                    >
+                      <Text
+                        style={{
+                          ...M3Type.bodySmall,
+                          color: c.onSurfaceVariant,
+                          fontVariant: ['tabular-nums'],
+                        }}
+                      >
+                        {fmtHHMM(s.started_at)}
+                      </Text>
+                      <Text
+                        style={{
+                          ...M3Type.labelLarge,
+                          color: c.tertiary,
+                          fontVariant: ['tabular-nums'],
+                        }}
+                      >
+                        {fmtShortMono(s.duration_seconds ?? 0)}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
         </View>
       )}
 
-      {rows.map((r) => (
-        <TimelineRow key={r.blockId} row={r} />
-      ))}
-
-      {unplanned.length > 0 && (
-        <View style={{ marginTop: 8 }}>
+      {/* Success hint when perfectly on plan and nothing drifted */}
+      {offPlanCount === 0 && sessions.length > 0 && (
+        <View
+          style={{
+            backgroundColor: c.elevation.level1,
+            borderRadius: 16,
+            padding: 16,
+            borderWidth: 1,
+            borderColor: c.outlineVariant,
+            alignItems: 'center',
+          }}
+        >
           <Text
             style={{
-              fontSize: 11,
-              fontWeight: '800',
-              color: '#888',
+              ...M3Type.labelMedium,
+              color: c.onSurfaceVariant,
               textTransform: 'uppercase',
-              letterSpacing: 0.5,
-              marginBottom: 6,
+              marginBottom: 4,
             }}
           >
-            Off plan ·{' '}
-            {fmtShort(
-              unplanned.reduce((s, u) => s + (u.duration_seconds ?? 0), 0),
-            )}{' '}
-            total
+            Off plan
           </Text>
-          {unplanned.map((s) => {
-            const task = tasks.find((t) => t.id === s.task_id);
-            return (
-              <View
-                key={s.id}
-                style={{
-                  backgroundColor: '#fff',
-                  padding: 10,
-                  borderRadius: 8,
-                  marginBottom: 6,
-                  flexDirection: 'row',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                }}
-              >
-                <Text style={{ fontSize: 13, color: '#1a1a2e' }}>
-                  {task?.title ?? 'Deleted task'}
-                </Text>
-                <Text style={{ fontSize: 12, fontWeight: '700', color: '#f59e0b' }}>
-                  {fmtShort(s.duration_seconds ?? 0)}
-                </Text>
-              </View>
-            );
-          })}
+          <Text style={{ ...M3Type.bodyMedium, color: success }}>
+            Nothing drifted today.
+          </Text>
         </View>
       )}
     </ScrollView>
   );
 }
 
-function ScoreTile({
+function Stat({
   label,
   value,
   color,
+  labelColor,
 }: {
   label: string;
   value: string;
   color: string;
+  labelColor?: string;
 }) {
   return (
-    <View
-      style={{
-        flex: 1,
-        backgroundColor: '#fff',
-        padding: 12,
-        borderRadius: 12,
-      }}
-    >
+    <View style={{ flex: 1, minWidth: 0 }}>
       <Text
         style={{
-          fontSize: 10,
-          fontWeight: '800',
-          color: '#888',
-          textTransform: 'uppercase',
+          fontSize: 12,
+          lineHeight: 16,
+          fontWeight: '500',
           letterSpacing: 0.5,
+          textTransform: 'uppercase',
+          color: labelColor,
         }}
       >
         {label}
       </Text>
-      <Text style={{ fontSize: 20, fontWeight: '800', color, marginTop: 4 }}>
+      <Text
+        style={{
+          fontSize: 28,
+          lineHeight: 36,
+          fontWeight: '400',
+          color,
+          fontVariant: ['tabular-nums'],
+          marginTop: 4,
+        }}
+      >
         {value}
       </Text>
     </View>
   );
 }
 
-function TimelineRow({ row }: { row: RowSummary }) {
-  const maxSeconds = Math.max(row.plannedSeconds, row.actualSeconds, 1);
-  const plannedPct = (row.plannedSeconds / maxSeconds) * 100;
-  const actualPct = (row.actualSeconds / maxSeconds) * 100;
-
-  const BADGE: Record<
-    RowSummary['status'],
-    { label: string; color: string; bg: string }
-  > = {
-    on_time: { label: '✓ On time', color: '#10b981', bg: '#d1fae5' },
-    over: {
-      label: `+${fmtShort(row.actualSeconds - row.plannedSeconds)}`,
-      color: '#dc2626',
-      bg: '#fee2e2',
-    },
-    under: {
-      label: `−${fmtShort(row.plannedSeconds - row.actualSeconds)}`,
-      color: '#10b981',
-      bg: '#d1fae5',
-    },
-    tracking: { label: '● Tracking', color: '#8b5cf6', bg: '#ede9fe' },
-    skipped: { label: 'Skipped', color: '#dc2626', bg: '#fee2e2' },
-  };
-  const b = BADGE[row.status];
-
-  return (
-    <View
-      style={{
-        backgroundColor: '#fff',
-        padding: 12,
-        borderRadius: 12,
-      }}
-    >
-      <View
-        style={{
-          flexDirection: 'row',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 6,
-        }}
-      >
-        <Text
-          style={{
-            fontSize: 13,
-            fontWeight: '700',
-            color: row.status === 'skipped' ? '#888' : '#1a1a2e',
-            textDecorationLine: row.status === 'skipped' ? 'line-through' : 'none',
-            flex: 1,
-          }}
-          numberOfLines={1}
-        >
-          {row.taskTitle}
-        </Text>
-        <View
-          style={{
-            backgroundColor: b.bg,
-            paddingHorizontal: 8,
-            paddingVertical: 2,
-            borderRadius: 6,
-          }}
-        >
-          <Text style={{ fontSize: 10, fontWeight: '700', color: b.color }}>
-            {b.label}
-          </Text>
-        </View>
-      </View>
-      <View style={{ height: 18, position: 'relative' }}>
-        <View
-          style={{
-            position: 'absolute',
-            top: 7,
-            height: 3,
-            width: `${plannedPct}%`,
-            backgroundColor: 'rgba(139,92,246,0.35)',
-            borderRadius: 2,
-          }}
-        />
-        <View
-          style={{
-            position: 'absolute',
-            top: 4,
-            height: 9,
-            width: `${actualPct}%`,
-            backgroundColor: '#8b5cf6',
-            borderRadius: 4,
-          }}
-        />
-      </View>
-      <Text style={{ fontSize: 11, color: '#888', marginTop: 4 }}>
-        Planned {fmtShort(row.plannedSeconds)} · Actual {fmtShort(row.actualSeconds)}
-      </Text>
-    </View>
-  );
+function Divider({ color }: { color: string }) {
+  return <View style={{ width: 1, backgroundColor: color, marginHorizontal: 12 }} />;
 }

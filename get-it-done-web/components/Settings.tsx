@@ -1,9 +1,12 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useStore } from '@/lib/store';
 import { SignOutButton } from './SignOutButton';
+import type { FocusMode } from '@/types';
+
+type UserPrefsDefaultMode = FocusMode;
 
 const RULE_LABELS: Record<string, { label: string; desc: string }> = {
   due_soon: {
@@ -131,6 +134,7 @@ export function Settings() {
             checked={prefs.notify_email}
             onChange={(v) => updatePrefs({ notify_email: v })}
           />
+          <TestNotificationButton />
         </section>
 
         <section className="bg-white rounded-[14px] p-5 mb-4 shadow-[0_1px_4px_rgba(0,0,0,0.06),0_0_0_1px_rgba(0,0,0,0.04)]">
@@ -221,12 +225,103 @@ export function Settings() {
         </section>
 
         <section className="bg-white rounded-[14px] p-5 shadow-[0_1px_4px_rgba(0,0,0,0.06),0_0_0_1px_rgba(0,0,0,0.04)]">
+          <h2 className="text-[13px] font-extrabold text-[#1a1a2e] uppercase tracking-[0.5px] mb-2">
+            Focus sessions
+          </h2>
+          <Toggle
+            label="Announce focus sessions"
+            desc="Play a spoken cue when entering Call Focus, App Focus, or Strict Zone."
+            checked={prefs.announce_focus_sessions ?? true}
+            onChange={(v) => updatePrefs({ announce_focus_sessions: v })}
+          />
+          <div className="flex items-center justify-between py-2 border-t border-[#eee]">
+            <div>
+              <div className="text-[13px] font-bold text-[#1a1a2e]">
+                Focus cue phrase
+              </div>
+              <div className="text-[11px] text-[#888]">
+                Spoken when a focus mode starts. Default: &quot;You have a meeting&quot;.
+              </div>
+            </div>
+            <input
+              value={prefs.focus_announce_phrase ?? 'You have a meeting'}
+              onChange={(e) => updatePrefs({ focus_announce_phrase: e.target.value })}
+              className="border-[1.5px] border-[#e5e7eb] rounded-lg px-2 py-1 text-[13px] w-[220px]"
+            />
+          </div>
+          <div className="flex items-center justify-between py-2 border-t border-[#eee]">
+            <div>
+              <div className="text-[13px] font-bold text-[#1a1a2e]">
+                Default timer mode
+              </div>
+              <div className="text-[11px] text-[#888]">
+                Mode applied when you start a timer from a task card.
+              </div>
+            </div>
+            <select
+              value={prefs.default_timer_mode ?? 'open'}
+              onChange={(e) =>
+                updatePrefs({
+                  default_timer_mode: e.target.value as UserPrefsDefaultMode,
+                })
+              }
+              className="border-[1.5px] border-[#e5e7eb] rounded-lg px-2 py-1 text-[13px]"
+            >
+              <option value="open">Open</option>
+              <option value="call_focus">Call focus</option>
+              <option value="app_focus">App focus</option>
+              <option value="strict">Strict zone</option>
+            </select>
+          </div>
+        </section>
+
+        <section className="bg-white rounded-[14px] p-5 shadow-[0_1px_4px_rgba(0,0,0,0.06),0_0_0_1px_rgba(0,0,0,0.04)]">
           <h2 className="text-[13px] font-extrabold text-[#1a1a2e] uppercase tracking-[0.5px] mb-3">
             Account
           </h2>
           <SignOutButton />
         </section>
       </div>
+    </div>
+  );
+}
+
+function TestNotificationButton() {
+  const [status, setStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [message, setMessage] = useState<string | null>(null);
+
+  const send = async () => {
+    setStatus('sending');
+    setMessage(null);
+    try {
+      const res = await fetch('/api/notifications/test', { method: 'POST' });
+      if (!res.ok) throw new Error(await res.text());
+      setStatus('sent');
+      setMessage('Sent — watch the 🔔 bell. Push and email arrive on the next cron tick (within 2 min).');
+    } catch (err) {
+      setStatus('error');
+      setMessage(err instanceof Error ? err.message : 'Failed to send');
+    }
+  };
+
+  return (
+    <div className="pt-3 border-t border-[#eee] mt-3">
+      <button
+        onClick={send}
+        disabled={status === 'sending'}
+        className="text-[13px] font-semibold text-[#7c3aed] hover:underline disabled:opacity-50"
+      >
+        {status === 'sending' ? 'Sending…' : 'Send test notification'}
+      </button>
+      {message && (
+        <p
+          className={`mt-2 text-[12px] ${
+            status === 'error' ? 'text-red-600' : 'text-[#6b7280]'
+          }`}
+        >
+          {message}
+        </p>
+      )}
     </div>
   );
 }

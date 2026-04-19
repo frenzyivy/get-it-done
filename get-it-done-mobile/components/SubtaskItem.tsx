@@ -1,23 +1,63 @@
 import { useState } from 'react';
 import { Alert, Pressable, Text, TextInput, View } from 'react-native';
 import { fmtShort } from '@/lib/utils';
+import { useStore } from '@/lib/store';
 import type { SubtaskType } from '@/types';
+
+// taskTitle is still in Props for API stability but no longer consumed after
+// Feature 4 (concurrent timers) removed the "switch" confirmation prompt.
 
 interface Props {
   subtask: SubtaskType;
+  taskId: string;
+  taskTitle: string;
   onToggle: () => void;
   onDelete: () => void;
   onRename: (title: string) => void;
 }
 
-export function SubtaskItem({ subtask, onToggle, onDelete, onRename }: Props) {
+// Feature 2a (mobile) — every subtask row gets its own play button. Clicking it
+// starts the global tracker with `subtask_id` set so time is attributed to the
+// specific subtask. Existing NowTrackingBar already shows "task → subtask".
+export function SubtaskItem({
+  subtask,
+  taskId,
+  taskTitle,
+  onToggle,
+  onDelete,
+  onRename,
+}: Props) {
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState(subtask.title);
+  const activeSessions = useStore((s) => s.activeSessions);
+  const startTrackingTask = useStore((s) => s.startTrackingTask);
+  const stopSession = useStore((s) => s.stopSession);
+  const openFocusMode = useStore((s) => s.openFocusMode);
+  const prefs = useStore((s) => s.prefs);
+
+  // Silence unused-prop warnings (Feature 4 dropped the task-title prompt).
+  void taskTitle;
+
+  const runningForThisSubtask = activeSessions.find(
+    (s) => s.subtask_id === subtask.id,
+  );
+  const isTrackingThis = !!runningForThisSubtask;
 
   const commit = () => {
     const next = val.trim();
     if (next && next !== subtask.title) onRename(next);
     setEditing(false);
+  };
+
+  const handlePlay = () => {
+    if (isTrackingThis && runningForThisSubtask) {
+      return void stopSession(runningForThisSubtask.id);
+    }
+    const defaultMode = prefs?.default_timer_mode ?? 'open';
+    void (async () => {
+      const session = await startTrackingTask(taskId, subtask.id, defaultMode);
+      if (session && defaultMode !== 'open') openFocusMode(session.id);
+    })();
   };
 
   const confirmDelete = () =>
@@ -100,6 +140,29 @@ export function SubtaskItem({ subtask, onToggle, onDelete, onRename }: Props) {
           </Text>
         </View>
       )}
+
+      <Pressable
+        onPress={handlePlay}
+        hitSlop={6}
+        style={{
+          width: 22,
+          height: 22,
+          borderRadius: 11,
+          backgroundColor: isTrackingThis ? '#8b5cf6' : 'rgba(139,92,246,0.1)',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <Text
+          style={{
+            color: isTrackingThis ? '#fff' : '#8b5cf6',
+            fontSize: 11,
+            fontWeight: '800',
+          }}
+        >
+          {isTrackingThis ? '⏸' : '▶'}
+        </Text>
+      </Pressable>
 
       <Pressable onPress={confirmDelete} hitSlop={8}>
         <Text style={{ color: '#ccc', fontSize: 16 }}>×</Text>

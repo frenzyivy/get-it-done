@@ -12,6 +12,10 @@ import { DailyGoalBar } from './DailyGoalBar';
 import { NowTrackingBar } from './NowTrackingBar';
 import { ColumnSwitcher } from './ColumnSwitcher';
 import { NotificationBell } from './NotificationBell';
+import { SkeletonBoard } from './Skeleton';
+import { FocusModeView } from './FocusModeView';
+import { RolloverPromptModal } from './RolloverPromptModal';
+import { FloatingAddButton } from './FloatingAddButton';
 
 // v2 spec §3 — new IA: compact header, then goal bar, now-tracking bar,
 // then the segmented board/list switcher. Sign out moved to Settings.
@@ -98,7 +102,7 @@ export function Dashboard({ userId }: { userId: string }) {
         </div>
 
         {loading && tasks.length === 0 ? (
-          <div className="text-center py-10 text-[#aaa] text-sm">Loading…</div>
+          <SkeletonBoard />
         ) : view === 'kanban' ? (
           <BoardView />
         ) : view === 'list' ? (
@@ -109,6 +113,9 @@ export function Dashboard({ userId }: { userId: string }) {
           <TimelineView />
         )}
       </div>
+      <FocusModeView />
+      <RolloverPromptModal />
+      <FloatingAddButton />
     </div>
   );
 }

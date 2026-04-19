@@ -15,18 +15,23 @@ import type {
   UserProfileV2,
   TrackedSession,
   PlannedBlock,
+  FocusMode,
+  DriftEvent,
 } from '@/types';
 
 interface TaskRow {
   id: string;
   user_id: string;
   title: string;
+  description: string | null;
   status: Status;
   priority: TaskType['priority'];
   due_date: string | null;
   total_time_seconds: number;
   estimated_seconds: number | null;
   sort_order: number;
+  allow_alarms: boolean | null;
+  planned_for_date: string | null;
   subtasks: SubtaskType[] | null;
   task_tags: { tag_id: string }[] | null;
   time_sessions: TimeSession[] | null;
@@ -40,12 +45,15 @@ function rowToTask(row: TaskRow): TaskType {
     id: row.id,
     user_id: row.user_id,
     title: row.title,
+    description: row.description ?? null,
     status: row.status,
     priority: row.priority,
     due_date: row.due_date,
     total_time_seconds: row.total_time_seconds,
     estimated_seconds: row.estimated_seconds ?? null,
     sort_order: row.sort_order,
+    allow_alarms: row.allow_alarms ?? false,
+    planned_for_date: row.planned_for_date ?? null,
     tag_ids: (row.task_tags ?? []).map((t) => t.tag_id),
     subtasks,
     sessions: row.time_sessions ?? [],
@@ -88,16 +96,29 @@ interface Store {
 
   // v2 — plan vs reality
   profileV2: UserProfileV2 | null;
-  activeSession: TrackedSession | null;
+  activeSessions: TrackedSession[];
   activeColumn: Status;
   lastStopSummary: { durationSeconds: number; at: number } | null;
+  focusSessionId: string | null;
   fetchProfileV2: () => Promise<void>;
-  fetchActiveSession: () => Promise<void>;
+  updateRolloverPromptDate: (dateISO: string) => Promise<void>;
+  setPlannedForDateBulk: (
+    updates: { id: string; planned_for_date: string | null }[],
+  ) => Promise<void>;
+  fetchActiveSessions: () => Promise<void>;
   setActiveColumn: (col: Status) => void;
-  startTrackingTask: (taskId: string, subtaskId?: string | null) => Promise<void>;
-  pauseActiveSession: () => Promise<void>;
-  stopActiveSession: () => Promise<void>;
-  persistActiveSessionDuration: () => Promise<void>;
+  startTrackingTask: (
+    taskId: string,
+    subtaskId?: string | null,
+    mode?: FocusMode,
+  ) => Promise<TrackedSession | null>;
+  pauseSession: (sessionId: string) => Promise<void>;
+  stopSession: (sessionId: string) => Promise<void>;
+  persistActiveSessionDurations: () => Promise<void>;
+  appendDriftEvent: (sessionId: string, drift: DriftEvent) => Promise<void>;
+  updateSessionMode: (sessionId: string, mode: FocusMode) => Promise<void>;
+  openFocusMode: (sessionId: string) => void;
+  closeFocusMode: () => void;
   clearStopSummary: () => void;
 
   plannedBlocks: PlannedBlock[];
@@ -106,7 +127,7 @@ interface Store {
   updatePlannedBlock: (id: string, updates: Partial<PlannedBlock>) => Promise<void>;
   deletePlannedBlock: (id: string) => Promise<void>;
 
-  addTask: (input: NewTaskInput) => Promise<void>;
+  addTask: (input: NewTaskInput) => Promise<string | null>;
   updateTask: (id: string, updates: Partial<TaskType>) => Promise<void>;
   deleteTask: (id: string) => Promise<void>;
   moveTask: (id: string, status: Status) => Promise<void>;
@@ -115,6 +136,7 @@ interface Store {
   toggleSubtask: (taskId: string, subtaskId: string) => Promise<void>;
   renameSubtask: (taskId: string, subtaskId: string, title: string) => Promise<void>;
   deleteSubtask: (taskId: string, subtaskId: string) => Promise<void>;
+  reorderSubtasks: (taskId: string, orderedIds: string[]) => Promise<void>;
 
   saveTimeSession: (
     taskId: string,
@@ -161,7 +183,7 @@ export const useStore = create<Store>((set, get) => ({
       get().fetchPrefs(),
       get().fetchRules(),
       get().fetchProfileV2(),
-      get().fetchActiveSession(),
+      get().fetchActiveSessions(),
     ]);
     set({ loading: false });
     get().subscribeNotifications();
@@ -320,9 +342,10 @@ export const useStore = create<Store>((set, get) => ({
 
   // ---- v2 — plan vs reality ------------------------------------------------
   profileV2: null,
-  activeSession: null,
+  activeSessions: [],
   activeColumn: 'in_progress',
   lastStopSummary: null,
+  focusSessionId: null,
 
   fetchProfileV2: async () => {
     const { userId } = get();
@@ -336,7 +359,43 @@ export const useStore = create<Store>((set, get) => ({
     if (data) set({ profileV2: data as UserProfileV2 });
   },
 
-  fetchActiveSession: async () => {
+  updateRolloverPromptDate: async (dateISO) => {
+    const { userId, profileV2 } = get();
+    if (!userId) return;
+    if (profileV2) {
+      set({ profileV2: { ...profileV2, last_rollover_prompt_date: dateISO } });
+    }
+    await supabase
+      .from('user_profiles')
+      .update({ last_rollover_prompt_date: dateISO })
+      .eq('user_id', userId);
+  },
+
+  setPlannedForDateBulk: async (updates) => {
+    if (updates.length === 0) return;
+    const prev = get().tasks;
+    const byId = new Map(updates.map((u) => [u.id, u.planned_for_date]));
+    set((s) => ({
+      tasks: s.tasks.map((t) =>
+        byId.has(t.id) ? { ...t, planned_for_date: byId.get(t.id) ?? null } : t,
+      ),
+    }));
+    const results = await Promise.all(
+      updates.map((u) =>
+        supabase
+          .from('tasks')
+          .update({ planned_for_date: u.planned_for_date })
+          .eq('id', u.id),
+      ),
+    );
+    const failed = results.find((r) => r.error);
+    if (failed?.error) {
+      set({ tasks: prev });
+      throw failed.error;
+    }
+  },
+
+  fetchActiveSessions: async () => {
     const { userId } = get();
     if (!userId) return;
     const { data, error } = await supabase
@@ -344,28 +403,20 @@ export const useStore = create<Store>((set, get) => ({
       .select('*')
       .eq('user_id', userId)
       .is('ended_at', null)
-      .order('started_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .order('started_at', { ascending: true });
     if (error) throw error;
-    set({ activeSession: (data as TrackedSession | null) ?? null });
+    set({ activeSessions: (data ?? []) as TrackedSession[] });
   },
 
   setActiveColumn: (col) => set({ activeColumn: col }),
 
-  startTrackingTask: async (taskId, subtaskId = null) => {
-    const { userId, activeSession } = get();
-    if (!userId) return;
-    if (activeSession) {
-      const now = new Date();
-      const dur = Math.floor(
-        (now.getTime() - new Date(activeSession.started_at).getTime()) / 1000,
-      );
-      await supabase
-        .from('tracked_sessions')
-        .update({ ended_at: now.toISOString(), duration_seconds: dur })
-        .eq('id', activeSession.id);
-    }
+  startTrackingTask: async (taskId, subtaskId = null, mode = 'open') => {
+    const { userId, activeSessions } = get();
+    if (!userId) return null;
+    const existing = activeSessions.find(
+      (s) => s.task_id === taskId && s.subtask_id === (subtaskId ?? null),
+    );
+    if (existing) return existing;
     const { data, error } = await supabase
       .from('tracked_sessions')
       .insert({
@@ -373,43 +424,45 @@ export const useStore = create<Store>((set, get) => ({
         task_id: taskId,
         subtask_id: subtaskId,
         started_at: new Date().toISOString(),
+        mode,
       })
       .select()
       .single();
     if (error) throw error;
-    set({ activeSession: data as TrackedSession });
+    const row = data as TrackedSession;
+    set((s) => ({ activeSessions: [...s.activeSessions, row] }));
+    return row;
   },
 
-  stopActiveSession: async () => {
-    const { activeSession } = get();
-    if (!activeSession) return;
+  stopSession: async (sessionId) => {
+    const { activeSessions } = get();
+    const sess = activeSessions.find((s) => s.id === sessionId);
+    if (!sess) return;
     const now = new Date();
     const dur = Math.max(
       0,
-      Math.floor(
-        (now.getTime() - new Date(activeSession.started_at).getTime()) / 1000,
-      ),
+      Math.floor((now.getTime() - new Date(sess.started_at).getTime()) / 1000),
     );
     const { error } = await supabase
       .from('tracked_sessions')
       .update({ ended_at: now.toISOString(), duration_seconds: dur })
-      .eq('id', activeSession.id);
+      .eq('id', sessionId);
     if (error) throw error;
-    set({
-      activeSession: null,
+    set((s) => ({
+      activeSessions: s.activeSessions.filter((x) => x.id !== sessionId),
       lastStopSummary: { durationSeconds: dur, at: Date.now() },
-    });
+      focusSessionId: s.focusSessionId === sessionId ? null : s.focusSessionId,
+    }));
   },
 
-  pauseActiveSession: async () => {
-    const { activeSession } = get();
-    if (!activeSession) return;
+  pauseSession: async (sessionId) => {
+    const { activeSessions } = get();
+    const sess = activeSessions.find((s) => s.id === sessionId);
+    if (!sess) return;
     const now = new Date();
     const dur = Math.max(
       0,
-      Math.floor(
-        (now.getTime() - new Date(activeSession.started_at).getTime()) / 1000,
-      ),
+      Math.floor((now.getTime() - new Date(sess.started_at).getTime()) / 1000),
     );
     const { error } = await supabase
       .from('tracked_sessions')
@@ -418,25 +471,61 @@ export const useStore = create<Store>((set, get) => ({
         duration_seconds: dur,
         was_paused: true,
       })
-      .eq('id', activeSession.id);
+      .eq('id', sessionId);
     if (error) throw error;
-    set({ activeSession: null });
+    set((s) => ({
+      activeSessions: s.activeSessions.filter((x) => x.id !== sessionId),
+      focusSessionId: s.focusSessionId === sessionId ? null : s.focusSessionId,
+    }));
   },
 
-  persistActiveSessionDuration: async () => {
-    const { activeSession } = get();
-    if (!activeSession) return;
-    const dur = Math.max(
-      0,
-      Math.floor(
-        (Date.now() - new Date(activeSession.started_at).getTime()) / 1000,
-      ),
+  persistActiveSessionDurations: async () => {
+    const { activeSessions } = get();
+    if (activeSessions.length === 0) return;
+    await Promise.all(
+      activeSessions.map((s) => {
+        const dur = Math.max(
+          0,
+          Math.floor((Date.now() - new Date(s.started_at).getTime()) / 1000),
+        );
+        return supabase
+          .from('tracked_sessions')
+          .update({ duration_seconds: dur })
+          .eq('id', s.id);
+      }),
     );
+  },
+
+  appendDriftEvent: async (sessionId, drift) => {
+    const { activeSessions } = get();
+    const sess = activeSessions.find((s) => s.id === sessionId);
+    if (!sess) return;
+    const nextDrifts = [...(sess.drift_events ?? []), drift];
+    set((s) => ({
+      activeSessions: s.activeSessions.map((x) =>
+        x.id === sessionId ? { ...x, drift_events: nextDrifts } : x,
+      ),
+    }));
     await supabase
       .from('tracked_sessions')
-      .update({ duration_seconds: dur })
-      .eq('id', activeSession.id);
+      .update({ drift_events: nextDrifts })
+      .eq('id', sessionId);
   },
+
+  updateSessionMode: async (sessionId, mode) => {
+    set((s) => ({
+      activeSessions: s.activeSessions.map((x) =>
+        x.id === sessionId ? { ...x, mode } : x,
+      ),
+    }));
+    await supabase
+      .from('tracked_sessions')
+      .update({ mode })
+      .eq('id', sessionId);
+  },
+
+  openFocusMode: (sessionId) => set({ focusSessionId: sessionId }),
+  closeFocusMode: () => set({ focusSessionId: null }),
 
   clearStopSummary: () => set({ lastStopSummary: null }),
 
@@ -516,8 +605,9 @@ export const useStore = create<Store>((set, get) => ({
       .from('tasks')
       .select(
         `
-        id, user_id, title, status, priority, due_date,
-        total_time_seconds, estimated_seconds, sort_order,
+        id, user_id, title, description, status, priority, due_date,
+        total_time_seconds, estimated_seconds, sort_order, allow_alarms,
+        planned_for_date,
         subtasks ( id, task_id, title, is_done, total_time_seconds, sort_order ),
         task_tags ( tag_id ),
         time_sessions ( id, task_id, subtask_id, started_at, duration_seconds, label )
@@ -532,7 +622,7 @@ export const useStore = create<Store>((set, get) => ({
 
   addTask: async (input) => {
     const { userId } = get();
-    if (!userId) return;
+    if (!userId) return null;
     const { data, error } = await supabase
       .from('tasks')
       .insert({
@@ -554,10 +644,19 @@ export const useStore = create<Store>((set, get) => ({
       if (tagErr) throw tagErr;
     }
     const newTask: TaskType = {
-      ...rowToTask({ ...task, subtasks: [], task_tags: [], time_sessions: [] }),
+      ...rowToTask({
+        ...task,
+        description: task.description ?? null,
+        allow_alarms: task.allow_alarms ?? false,
+        planned_for_date: task.planned_for_date ?? null,
+        subtasks: [],
+        task_tags: [],
+        time_sessions: [],
+      }),
       tag_ids: input.tag_ids,
     };
     set((s) => ({ tasks: [...s.tasks, newTask] }));
+    return task.id;
   },
 
   updateTask: async (id, updates) => {
@@ -567,9 +666,16 @@ export const useStore = create<Store>((set, get) => ({
     }));
     const payload: Record<string, unknown> = {};
     if (updates.title !== undefined) payload.title = updates.title;
+    if (updates.description !== undefined) payload.description = updates.description;
     if (updates.priority !== undefined) payload.priority = updates.priority;
     if (updates.status !== undefined) payload.status = updates.status;
     if (updates.due_date !== undefined) payload.due_date = updates.due_date;
+    if (updates.estimated_seconds !== undefined)
+      payload.estimated_seconds = updates.estimated_seconds;
+    if (updates.allow_alarms !== undefined) payload.allow_alarms = updates.allow_alarms;
+    if (updates.planned_for_date !== undefined)
+      payload.planned_for_date = updates.planned_for_date;
+    if (updates.sort_order !== undefined) payload.sort_order = updates.sort_order;
     if (Object.keys(payload).length === 0) return;
     const { error } = await supabase.from('tasks').update(payload).eq('id', id);
     if (error) {
@@ -688,6 +794,32 @@ export const useStore = create<Store>((set, get) => ({
     if (error) {
       set({ tasks: prev });
       throw error;
+    }
+  },
+
+  reorderSubtasks: async (taskId, orderedIds) => {
+    const prev = get().tasks;
+    const task = prev.find((t) => t.id === taskId);
+    if (!task) return;
+    const byId = new Map(task.subtasks.map((s) => [s.id, s]));
+    const next = orderedIds
+      .map((id, i) => {
+        const s = byId.get(id);
+        return s ? { ...s, sort_order: i } : null;
+      })
+      .filter((s): s is SubtaskType => s !== null);
+    set((s) => ({
+      tasks: s.tasks.map((t) => (t.id === taskId ? { ...t, subtasks: next } : t)),
+    }));
+    const results = await Promise.all(
+      next.map((s) =>
+        supabase.from('subtasks').update({ sort_order: s.sort_order }).eq('id', s.id),
+      ),
+    );
+    const failed = results.find((r) => r.error);
+    if (failed?.error) {
+      set({ tasks: prev });
+      throw failed.error;
     }
   },
 

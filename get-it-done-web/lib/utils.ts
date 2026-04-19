@@ -46,3 +46,23 @@ export function isToday(iso: string | null | undefined): boolean {
     d.getDate() === n.getDate()
   );
 }
+
+// YYYY-MM-DD in the user's local timezone. Matches what Postgres writes for a
+// DATE column and what `<input type="date">` produces, so it survives round-
+// trips without UTC-shift bugs. Used for `tasks.planned_for_date`.
+export function toLocalDateISO(d: Date = new Date()): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+export function todayISO(): string {
+  return toLocalDateISO(new Date());
+}
+
+export function tomorrowISO(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return toLocalDateISO(d);
+}
