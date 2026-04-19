@@ -430,6 +430,25 @@ export const useStore = create<Store>((set, get) => ({
     if (error) throw error;
     const row = data as TrackedSession;
     set((s) => ({ activeSessions: [...s.activeSessions, row] }));
+
+    // Auto-promote todo → in_progress when work actively starts.
+    const parent = get().tasks.find((t) => t.id === taskId);
+    if (parent && parent.status === 'todo') {
+      set((s) => ({
+        tasks: s.tasks.map((t) => (t.id === taskId ? { ...t, status: 'in_progress' } : t)),
+      }));
+      const { error: promoteErr } = await supabase()
+        .from('tasks')
+        .update({ status: 'in_progress' })
+        .eq('id', taskId);
+      if (promoteErr) {
+        // Roll back local status but keep the session running.
+        set((s) => ({
+          tasks: s.tasks.map((t) => (t.id === taskId ? { ...t, status: 'todo' } : t)),
+        }));
+      }
+    }
+
     return row;
   },
 
@@ -620,7 +639,28 @@ export const useStore = create<Store>((set, get) => ({
       .order('sort_order', { ascending: true });
     if (error) throw error;
     const rows = (data ?? []) as unknown as TaskRow[];
-    set({ tasks: rows.map(rowToTask) });
+    const tasks = rows.map(rowToTask);
+
+    // Backfill: any todo task with at least one done subtask is actually in
+    // progress. Fixes tasks completed before the auto-promote rule existed.
+    const toPromote = tasks.filter(
+      (t) =>
+        t.status === 'todo' &&
+        t.subtasks.some((s) => s.is_done) &&
+        !t.subtasks.every((s) => s.is_done),
+    );
+    if (toPromote.length > 0) {
+      const ids = toPromote.map((t) => t.id);
+      for (const t of tasks) {
+        if (ids.includes(t.id)) t.status = 'in_progress';
+      }
+      void supabase()
+        .from('tasks')
+        .update({ status: 'in_progress' })
+        .in('id', ids);
+    }
+
+    set({ tasks });
   },
 
   addTask: async (input) => {
@@ -732,6 +772,7 @@ export const useStore = create<Store>((set, get) => ({
     let nextStatus: Status = task.status;
     if (allDone) nextStatus = 'done';
     else if (task.status === 'done') nextStatus = 'in_progress';
+    else if (newDone && task.status === 'todo') nextStatus = 'in_progress';
 
     const prev = get().tasks;
     set((s) => ({
