@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { fmtShort } from '@/lib/utils';
 import { useStore } from '@/lib/store';
 import { useLiveTimers } from '@/lib/useLiveTimer';
@@ -25,7 +25,11 @@ interface Props {
   onHighlightClear?: () => void;
 }
 
-const MIN_WINDOW_MS = 8 * 3600 * 1000;
+const HOUR_MS = 3600 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+const PX_PER_HOUR = 120; // fixed horizontal scale → full day is 2880px wide
+const DAY_WIDTH_PX = 24 * PX_PER_HOUR;
+const LEFT_GUTTER = 36;
 const TRACK_HEIGHT = 28;
 const PLANNED_TRACK_TOP = 36;
 const ACTUAL_TRACK_TOP = 76;
@@ -66,6 +70,8 @@ export function TimelineGantt({
 
   const [hover, setHover] = useState<{ x: number; meta: BlockMeta } | null>(null);
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const didCenterRef = useRef(false);
 
   // Build planned + actual block metadata up front so bounds + render share data.
   const plannedMeta: BlockMeta[] = useMemo(
@@ -91,14 +97,35 @@ export function TimelineGantt({
 
   const actualMeta: BlockMeta[] = useMemo(() => {
     const liveIds = new Set(activeSessions.map((a) => a.id));
-    const blocks = sessions.map((s) => {
+    const blocks: BlockMeta[] = [];
+    for (const s of sessions) {
       const task = tasks.find((t) => t.id === s.task_id);
       const sub = task?.subtasks.find((x) => x.id === s.subtask_id);
       const start = new Date(s.started_at).getTime();
       const isLive = !s.ended_at && liveIds.has(s.id);
-      const dur = isLive
-        ? elapsedMap[s.id] ?? Math.floor((nowMs - start) / 1000)
-        : s.duration_seconds ?? Math.floor((nowMs - start) / 1000);
+
+      // Only paint blocks for time the user actually reported:
+      //  • live timer  → use current elapsed, capped so an abandoned timer
+      //    (started hours ago, browser left open) doesn't paint a giant bar
+      //    across time the user wasn't actually working
+      //  • ended session with duration_seconds → use that
+      //  • orphaned session (no end, not live) → skip entirely so we don't
+      //    paint a giant bar from started_at to "now".
+      const IDLE_CAP_SECONDS = 30 * 60;
+      let dur: number;
+      if (isLive) {
+        const rawElapsed = elapsedMap[s.id] ?? Math.floor((nowMs - start) / 1000);
+        const persisted = typeof s.duration_seconds === 'number' ? s.duration_seconds : 0;
+        // If the persisted duration is far behind the wall-clock elapsed, the
+        // 30s heartbeat has stopped (tab closed / asleep). Trust the persisted
+        // value + a small idle cap instead of the raw wall-clock.
+        dur = rawElapsed - persisted > IDLE_CAP_SECONDS ? persisted + IDLE_CAP_SECONDS : rawElapsed;
+      } else if (typeof s.duration_seconds === 'number' && s.duration_seconds > 0) {
+        dur = s.duration_seconds;
+      } else {
+        continue;
+      }
+
       const matchedPlanned = plannedMeta.find(
         (p) =>
           p.taskId === s.task_id &&
@@ -109,7 +136,7 @@ export function TimelineGantt({
       if (isLive) color = '#8b5cf6';
       else if (matchedPlanned) color = '#10b981';
       else color = '#a855f7';
-      return {
+      blocks.push({
         id: `a-${s.id}`,
         taskId: s.task_id,
         title: task?.title ?? 'Deleted task',
@@ -117,8 +144,8 @@ export function TimelineGantt({
         startMs: start,
         endMs: start + dur * 1000,
         color,
-      } as BlockMeta;
-    });
+      });
+    }
 
     // New-spec-1 Feature 4 — lane-stacking. Greedy first-fit: for each block
     // sorted by start, place it in the lowest-indexed lane whose last block
@@ -150,40 +177,17 @@ export function TimelineGantt({
     [actualMeta],
   );
 
-  // Auto-bound the x-axis. If no data fall back to dayStart..dayStart+8h.
-  const { windowStartMs, windowEndMs } = useMemo(() => {
-    const all = [...plannedMeta, ...actualMeta];
-    if (all.length === 0) {
-      return {
-        windowStartMs: dayStart.getTime(),
-        windowEndMs: dayStart.getTime() + MIN_WINDOW_MS,
-      };
-    }
-    const minStart = Math.min(...all.map((b) => b.startMs));
-    const maxEnd = Math.max(...all.map((b) => b.endMs), nowMs);
-    let startMs = minStart - 60 * 60 * 1000; // 1h before
-    let endMs = maxEnd + 60 * 60 * 1000; // 1h after
-    if (endMs - startMs < MIN_WINDOW_MS) {
-      // Pad symmetrically to reach the 8h minimum.
-      const pad = (MIN_WINDOW_MS - (endMs - startMs)) / 2;
-      startMs -= pad;
-      endMs += pad;
-    }
-    // Snap start down to a half-hour boundary for cleaner ticks.
-    const snapMs = 30 * 60 * 1000;
-    startMs = Math.floor(startMs / snapMs) * snapMs;
-    endMs = Math.ceil(endMs / snapMs) * snapMs;
-    return { windowStartMs: startMs, windowEndMs: endMs };
-  }, [plannedMeta, actualMeta, dayStart, nowMs]);
+  // Full 24h window anchored to the day. The scroll container handles clipping;
+  // the inner canvas is always DAY_WIDTH_PX wide so 1h == PX_PER_HOUR px.
+  const windowStartMs = dayStart.getTime();
+  const windowEndMs = windowStartMs + DAY_MS;
+  const totalMs = DAY_MS;
 
-  const totalMs = windowEndMs - windowStartMs;
-
-  // Hour ticks within the window.
+  // Hour ticks across the full 24h window.
   const ticks = useMemo(() => {
     const out: { ms: number; label: string }[] = [];
-    const HOUR = 3600 * 1000;
-    const first = Math.ceil(windowStartMs / HOUR) * HOUR;
-    for (let t = first; t <= windowEndMs; t += HOUR) {
+    for (let i = 0; i <= 24; i++) {
+      const t = windowStartMs + i * HOUR_MS;
       out.push({
         ms: t,
         label: new Date(t).toLocaleTimeString('en-IN', {
@@ -193,11 +197,24 @@ export function TimelineGantt({
       });
     }
     return out;
-  }, [windowStartMs, windowEndMs]);
+  }, [windowStartMs]);
 
   const showNow = nowMs >= windowStartMs && nowMs <= windowEndMs;
 
+  // Auto-center the scroll on "now" the first time the canvas mounts with a
+  // valid width. Runs once per session — user scrolling thereafter is preserved.
+  useEffect(() => {
+    if (didCenterRef.current) return;
+    const el = scrollRef.current;
+    if (!el || el.clientWidth === 0) return;
+    const nowPx = LEFT_GUTTER + ((nowMs - windowStartMs) / HOUR_MS) * PX_PER_HOUR;
+    const target = Math.max(0, nowPx - el.clientWidth / 2);
+    el.scrollLeft = target;
+    didCenterRef.current = true;
+  }, [nowMs, windowStartMs]);
+
   const xPct = (ms: number) => ((ms - windowStartMs) / totalMs) * 100;
+  const xPx = (ms: number) => ((ms - windowStartMs) / HOUR_MS) * PX_PER_HOUR;
 
   // Width as percent, then enforce a 32px minimum after layout (via min-width).
   const renderBlock = (
@@ -256,7 +273,7 @@ export function TimelineGantt({
 
   return (
     <>
-      <div className="bg-white rounded-[14px] p-4 shadow-[0_1px_4px_rgba(0,0,0,0.06),0_0_0_1px_rgba(0,0,0,0.04)] overflow-x-auto">
+      <div className="bg-white rounded-[14px] p-4 shadow-[0_1px_4px_rgba(0,0,0,0.06),0_0_0_1px_rgba(0,0,0,0.04)]">
         <div className="flex items-center justify-between mb-3">
           <div className="text-[13px] font-extrabold uppercase tracking-[0.5px] text-[#1a1a2e]">
             {dayStart.toLocaleDateString('en-IN', {
@@ -281,13 +298,14 @@ export function TimelineGantt({
           </div>
         </div>
 
-        <div className="relative min-w-[640px]" style={{ height: 130 }}>
+        <div ref={scrollRef} className="overflow-x-auto">
+        <div className="relative" style={{ height: 130, width: LEFT_GUTTER + DAY_WIDTH_PX }}>
           {/* Hour gridlines + labels */}
           {ticks.map((t) => (
             <div
               key={t.ms}
               className="absolute top-[24px] bottom-0 border-l border-dashed border-[#eee]"
-              style={{ left: `${xPct(t.ms)}%` }}
+              style={{ left: LEFT_GUTTER + xPx(t.ms) }}
             >
               <div className="absolute -top-[20px] -translate-x-1/2 text-[10px] text-[#888] whitespace-nowrap">
                 {t.label}
@@ -312,16 +330,16 @@ export function TimelineGantt({
           {/* Track backgrounds */}
           <div
             className="absolute rounded-md bg-[#f9fafb]"
-            style={{ left: 36, right: 0, top: PLANNED_TRACK_TOP, height: TRACK_HEIGHT }}
+            style={{ left: LEFT_GUTTER, width: DAY_WIDTH_PX, top: PLANNED_TRACK_TOP, height: TRACK_HEIGHT }}
           />
           <div
             className="absolute rounded-md bg-[#f9fafb]"
-            style={{ left: 36, right: 0, top: ACTUAL_TRACK_TOP, height: TRACK_HEIGHT }}
+            style={{ left: LEFT_GUTTER, width: DAY_WIDTH_PX, top: ACTUAL_TRACK_TOP, height: TRACK_HEIGHT }}
           />
 
           {/* The blocks themselves live in an absolute layer that respects the
               gutter under the track labels. */}
-          <div className="absolute" style={{ left: 36, right: 0, top: 0, bottom: 0 }}>
+          <div className="absolute" style={{ left: LEFT_GUTTER, width: DAY_WIDTH_PX, top: 0, bottom: 0 }}>
             {plannedMeta.map((p) =>
               renderBlock(
                 p,
@@ -402,6 +420,7 @@ export function TimelineGantt({
               </div>
             )}
           </div>
+        </div>
         </div>
 
         {highlightSessionId && (
