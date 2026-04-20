@@ -5,6 +5,7 @@ import { useTheme } from 'react-native-paper';
 import { PRIORITY_ORDER } from '@/lib/constants';
 import { useStore } from '@/lib/store';
 import { isToday } from '@/lib/utils';
+import { useUI } from '@/lib/ui-context';
 import { TaskItem } from './TaskItem';
 import { TodayCard } from './TodayCard';
 import { type as M3Type } from '@/lib/theme';
@@ -115,6 +116,7 @@ export function ListView() {
   const theme = useTheme();
   const c = theme.colors;
   const tasks = useStore((s) => s.tasks);
+  const { openAddTask } = useUI();
 
   const sections = useMemo<Section[]>(() => {
     const byPriority = (a: TaskType, b: TaskType) =>
@@ -158,6 +160,39 @@ export function ListView() {
       }}
     >
       <TodayCard />
+
+      <Pressable
+        onPress={() => openAddTask('todo')}
+        accessibilityRole="button"
+        accessibilityLabel="Quick add a new task"
+        style={({ pressed }) => ({
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 10,
+          paddingVertical: 12,
+          paddingHorizontal: 14,
+          borderRadius: 14,
+          backgroundColor: pressed ? c.elevation.level2 : c.elevation.level1,
+          borderWidth: 1,
+          borderColor: c.outlineVariant,
+        })}
+      >
+        <View
+          style={{
+            width: 26,
+            height: 26,
+            borderRadius: 13,
+            backgroundColor: c.primary,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <MaterialCommunityIcons name="plus" size={18} color={c.onPrimary} />
+        </View>
+        <Text style={{ ...M3Type.bodyLarge, color: c.onSurface }}>
+          Add a task
+        </Text>
+      </Pressable>
 
       {!hasAny && (
         <View style={{ alignItems: 'center', paddingVertical: 40 }}>

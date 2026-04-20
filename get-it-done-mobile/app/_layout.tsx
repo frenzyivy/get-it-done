@@ -36,6 +36,7 @@ export default function RootLayout() {
 function ThemedRoot({ fontsLoaded }: { fontsLoaded: boolean }) {
   const { theme } = useAppTheme();
   const [authReady, setAuthReady] = useState(false);
+  const userId = useStore((s) => s.userId);
   const setUserId = useStore((s) => s.setUserId);
   const fetchAll = useStore((s) => s.fetchAll);
   const router = useRouter();
@@ -59,14 +60,13 @@ function ThemedRoot({ fontsLoaded }: { fontsLoaded: boolean }) {
 
   useEffect(() => {
     if (!authReady) return;
-    const userId = useStore.getState().userId;
     const inAuthGroup = segments[0] === '(tabs)';
     if (!userId && inAuthGroup) {
       router.replace('/login');
     } else if (userId && !inAuthGroup) {
       router.replace('/(tabs)');
     }
-  }, [authReady, segments, router]);
+  }, [authReady, userId, segments, router]);
 
   if (!fontsLoaded || !authReady) {
     return (

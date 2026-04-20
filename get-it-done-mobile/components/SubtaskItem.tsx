@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Alert, Pressable, Text, TextInput, View } from 'react-native';
 import { fmtShort } from '@/lib/utils';
 import { useStore } from '@/lib/store';
+import { useSessionElapsed } from '@/lib/useLiveTimer';
 import type { SubtaskType } from '@/types';
 
 // taskTitle is still in Props for API stability but no longer consumed after
@@ -42,6 +43,7 @@ export function SubtaskItem({
     (s) => s.subtask_id === subtask.id,
   );
   const isTrackingThis = !!runningForThisSubtask;
+  const liveElapsed = useSessionElapsed(runningForThisSubtask?.id);
 
   const commit = () => {
     const next = val.trim();
@@ -73,6 +75,9 @@ export function SubtaskItem({
         alignItems: 'center',
         gap: 8,
         paddingVertical: 5,
+        paddingLeft: isTrackingThis ? 7 : 0,
+        borderLeftWidth: isTrackingThis ? 3 : 0,
+        borderLeftColor: '#8b5cf6',
         borderBottomWidth: 1,
         borderBottomColor: 'rgba(0,0,0,0.04)',
       }}
@@ -126,28 +131,43 @@ export function SubtaskItem({
         </Pressable>
       )}
 
-      {subtask.total_time_seconds > 0 && (
+      {isTrackingThis ? (
         <View
           style={{
-            backgroundColor: 'rgba(139,92,246,0.08)',
-            paddingHorizontal: 6,
-            paddingVertical: 1,
+            backgroundColor: '#8b5cf6',
+            paddingHorizontal: 7,
+            paddingVertical: 2,
             borderRadius: 5,
           }}
         >
-          <Text style={{ fontSize: 10, fontWeight: '700', color: '#8b5cf6' }}>
-            🕐 {fmtShort(subtask.total_time_seconds)}
+          <Text style={{ fontSize: 10, fontWeight: '800', color: '#fff' }}>
+            {fmtShort(liveElapsed)}
           </Text>
         </View>
+      ) : (
+        subtask.total_time_seconds > 0 && (
+          <View
+            style={{
+              backgroundColor: 'rgba(139,92,246,0.08)',
+              paddingHorizontal: 6,
+              paddingVertical: 1,
+              borderRadius: 5,
+            }}
+          >
+            <Text style={{ fontSize: 10, fontWeight: '700', color: '#8b5cf6' }}>
+              🕐 {fmtShort(subtask.total_time_seconds)}
+            </Text>
+          </View>
+        )
       )}
 
       <Pressable
         onPress={handlePlay}
         hitSlop={6}
         style={{
-          width: 22,
-          height: 22,
-          borderRadius: 11,
+          width: 28,
+          height: 28,
+          borderRadius: 14,
           backgroundColor: isTrackingThis ? '#8b5cf6' : 'rgba(139,92,246,0.1)',
           alignItems: 'center',
           justifyContent: 'center',
@@ -156,11 +176,11 @@ export function SubtaskItem({
         <Text
           style={{
             color: isTrackingThis ? '#fff' : '#8b5cf6',
-            fontSize: 11,
+            fontSize: 12,
             fontWeight: '800',
           }}
         >
-          {isTrackingThis ? '⏸' : '▶'}
+          {isTrackingThis ? '■' : '▶'}
         </Text>
       </Pressable>
 

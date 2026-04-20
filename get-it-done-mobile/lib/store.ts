@@ -111,9 +111,12 @@ interface Store {
     taskId: string,
     subtaskId?: string | null,
     mode?: FocusMode,
+    plannedDurationSeconds?: number | null,
   ) => Promise<TrackedSession | null>;
   pauseSession: (sessionId: string) => Promise<void>;
   stopSession: (sessionId: string) => Promise<void>;
+  completeSession: (sessionId: string) => Promise<void>;
+  markSessionBroken: (sessionId: string, reason: string) => Promise<void>;
   persistActiveSessionDurations: () => Promise<void>;
   appendDriftEvent: (sessionId: string, drift: DriftEvent) => Promise<void>;
   updateSessionMode: (sessionId: string, mode: FocusMode) => Promise<void>;
@@ -410,7 +413,12 @@ export const useStore = create<Store>((set, get) => ({
 
   setActiveColumn: (col) => set({ activeColumn: col }),
 
-  startTrackingTask: async (taskId, subtaskId = null, mode = 'open') => {
+  startTrackingTask: async (
+    taskId,
+    subtaskId = null,
+    mode = 'open',
+    plannedDurationSeconds = null,
+  ) => {
     const { userId, activeSessions } = get();
     if (!userId) return null;
     const existing = activeSessions.find(
@@ -425,12 +433,31 @@ export const useStore = create<Store>((set, get) => ({
         subtask_id: subtaskId,
         started_at: new Date().toISOString(),
         mode,
+        planned_duration_seconds: plannedDurationSeconds,
       })
       .select()
       .single();
     if (error) throw error;
     const row = data as TrackedSession;
     set((s) => ({ activeSessions: [...s.activeSessions, row] }));
+
+    // Auto-promote todo → in_progress when work actively starts (web parity).
+    const parent = get().tasks.find((t) => t.id === taskId);
+    if (parent && parent.status === 'todo') {
+      set((s) => ({
+        tasks: s.tasks.map((t) => (t.id === taskId ? { ...t, status: 'in_progress' } : t)),
+      }));
+      const { error: promoteErr } = await supabase
+        .from('tasks')
+        .update({ status: 'in_progress' })
+        .eq('id', taskId);
+      if (promoteErr) {
+        set((s) => ({
+          tasks: s.tasks.map((t) => (t.id === taskId ? { ...t, status: 'todo' } : t)),
+        }));
+      }
+    }
+
     return row;
   },
 
@@ -453,6 +480,43 @@ export const useStore = create<Store>((set, get) => ({
       lastStopSummary: { durationSeconds: dur, at: Date.now() },
       focusSessionId: s.focusSessionId === sessionId ? null : s.focusSessionId,
     }));
+  },
+
+  // Focus Lock — countdown reached zero. Same as stopSession but refreshes
+  // the streak from the server (the SQL trigger may have bumped it).
+  completeSession: async (sessionId) => {
+    await get().stopSession(sessionId);
+    await get().fetchProfileV2();
+  },
+
+  // Focus Lock — user exited a Strict session early. Writes broken=true +
+  // reason, ends the session, then re-fetches profile so the now-reset
+  // streak flips to 0 in the UI.
+  markSessionBroken: async (sessionId, reason) => {
+    const { activeSessions } = get();
+    const sess = activeSessions.find((s) => s.id === sessionId);
+    if (!sess) return;
+    const now = new Date();
+    const dur = Math.max(
+      0,
+      Math.floor((now.getTime() - new Date(sess.started_at).getTime()) / 1000),
+    );
+    const { error } = await supabase
+      .from('tracked_sessions')
+      .update({
+        ended_at: now.toISOString(),
+        duration_seconds: dur,
+        broken: true,
+        broken_reason: reason,
+      })
+      .eq('id', sessionId);
+    if (error) throw error;
+    set((s) => ({
+      activeSessions: s.activeSessions.filter((x) => x.id !== sessionId),
+      lastStopSummary: { durationSeconds: dur, at: Date.now() },
+      focusSessionId: s.focusSessionId === sessionId ? null : s.focusSessionId,
+    }));
+    await get().fetchProfileV2();
   },
 
   pauseSession: async (sessionId) => {

@@ -23,6 +23,9 @@ interface Props {
   sessions: TrackedSession[];
   highlightSessionId?: string | null;
   onHighlightClear?: () => void;
+  // Called after an Adjust/Delete so the parent can refetch sessions. Optional
+  // because TimelineGantt is also rendered in places that pull from the store.
+  onSessionsChanged?: () => void;
 }
 
 const HOUR_MS = 3600 * 1000;
@@ -54,11 +57,16 @@ export function TimelineGantt({
   sessions,
   highlightSessionId,
   onHighlightClear,
+  onSessionsChanged,
 }: Props) {
   const tasks = useStore((s) => s.tasks);
   const tags = useStore((s) => s.tags);
   const activeSessions = useStore((s) => s.activeSessions);
   const elapsedMap = useLiveTimers();
+  const updateSessionTimes = useStore((s) => s.updateSessionTimes);
+  const deleteSession = useStore((s) => s.deleteSession);
+  const stopSession = useStore((s) => s.stopSession);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
 
   // `nowMs` is sampled once and ticked every minute. Storing it as state keeps
   // every Date.now() reference out of the render body (React Compiler purity).
@@ -105,21 +113,18 @@ export function TimelineGantt({
       const isLive = !s.ended_at && liveIds.has(s.id);
 
       // Only paint blocks for time the user actually reported:
-      //  • live timer  → use current elapsed, capped so an abandoned timer
-      //    (started hours ago, browser left open) doesn't paint a giant bar
-      //    across time the user wasn't actually working
-      //  • ended session with duration_seconds → use that
+      //  • live timer  → cap at LIVE_CAP_SECONDS. A timer left running for
+      //    hours is almost always abandoned (tab open, user away). We can't
+      //    tell "actually working" from "walked away", so we hard-cap the
+      //    visual so untracked hours don't get painted as work.
+      //  • ended session with duration_seconds → use that as-is.
       //  • orphaned session (no end, not live) → skip entirely so we don't
       //    paint a giant bar from started_at to "now".
-      const IDLE_CAP_SECONDS = 30 * 60;
+      const LIVE_CAP_SECONDS = 45 * 60;
       let dur: number;
       if (isLive) {
         const rawElapsed = elapsedMap[s.id] ?? Math.floor((nowMs - start) / 1000);
-        const persisted = typeof s.duration_seconds === 'number' ? s.duration_seconds : 0;
-        // If the persisted duration is far behind the wall-clock elapsed, the
-        // 30s heartbeat has stopped (tab closed / asleep). Trust the persisted
-        // value + a small idle cap instead of the raw wall-clock.
-        dur = rawElapsed - persisted > IDLE_CAP_SECONDS ? persisted + IDLE_CAP_SECONDS : rawElapsed;
+        dur = Math.min(rawElapsed, LIVE_CAP_SECONDS);
       } else if (typeof s.duration_seconds === 'number' && s.duration_seconds > 0) {
         dur = s.duration_seconds;
       } else {
@@ -357,11 +362,15 @@ export function TimelineGantt({
               // `actualLaneCount` sub-lanes and shrink each block to fit.
               const laneHeight = TRACK_HEIGHT / actualLaneCount;
               const top = ACTUAL_TRACK_TOP + (a.lane ?? 0) * laneHeight;
+              // Actual-track click opens the Adjust popover (edit/delete the
+              // session). Held-down-timer accidents are the whole reason this
+              // exists, so we don't route to the task drawer here.
+              const sessionId = a.id.startsWith('a-') ? a.id.slice(2) : null;
               return renderBlock(
                 a,
                 top,
                 1,
-                a.taskId ? () => setOpenTaskId(a.taskId!) : null,
+                sessionId ? () => setEditingSessionId(sessionId) : null,
                 overran,
                 laneHeight,
               );
@@ -442,6 +451,193 @@ export function TimelineGantt({
           onClose={() => setOpenTaskId(null)}
         />
       )}
+
+      {editingSessionId && (
+        <AdjustSessionModal
+          session={
+            sessions.find((s) => s.id === editingSessionId) ??
+            activeSessions.find((s) => s.id === editingSessionId) ??
+            null
+          }
+          taskTitle={
+            (() => {
+              const sess =
+                sessions.find((s) => s.id === editingSessionId) ??
+                activeSessions.find((s) => s.id === editingSessionId);
+              return tasks.find((t) => t.id === sess?.task_id)?.title ?? 'Session';
+            })()
+          }
+          onClose={() => setEditingSessionId(null)}
+          onStopLive={async () => {
+            await stopSession(editingSessionId);
+            setEditingSessionId(null);
+            onSessionsChanged?.();
+          }}
+          onSave={async (startedAt, endedAt) => {
+            await updateSessionTimes(editingSessionId, startedAt, endedAt);
+            setEditingSessionId(null);
+            onSessionsChanged?.();
+          }}
+          onDelete={async () => {
+            await deleteSession(editingSessionId);
+            setEditingSessionId(null);
+            onSessionsChanged?.();
+          }}
+        />
+      )}
     </>
   );
+}
+
+// Modal for adjusting a single tracked session — edit start/end or delete.
+// Kept as a local component so TimelineGantt stays self-contained.
+function AdjustSessionModal({
+  session,
+  taskTitle,
+  onClose,
+  onStopLive,
+  onSave,
+  onDelete,
+}: {
+  session: TrackedSession | null;
+  taskTitle: string;
+  onClose: () => void;
+  onStopLive: () => Promise<void>;
+  onSave: (startedAtISO: string, endedAtISO: string) => Promise<void>;
+  onDelete: () => Promise<void>;
+}) {
+  const isLive = !!session && !session.ended_at;
+  const fallbackEnd = session
+    ? new Date(
+        new Date(session.started_at).getTime() +
+          ((session.duration_seconds ?? 0) * 1000 || 60 * 60 * 1000),
+      ).toISOString()
+    : new Date().toISOString();
+  const initialStart = session ? toLocalInputValue(session.started_at) : '';
+  const initialEnd = session
+    ? toLocalInputValue(session.ended_at ?? fallbackEnd)
+    : '';
+  const [startVal, setStartVal] = useState(initialStart);
+  const [endVal, setEndVal] = useState(initialEnd);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  if (!session) return null;
+
+  const handleSave = async () => {
+    setErr(null);
+    const startISO = fromLocalInputValue(startVal);
+    const endISO = fromLocalInputValue(endVal);
+    if (!startISO || !endISO) {
+      setErr('Please fill both times.');
+      return;
+    }
+    if (new Date(endISO).getTime() <= new Date(startISO).getTime()) {
+      setErr('End must be after start.');
+      return;
+    }
+    setBusy(true);
+    try {
+      await onSave(startISO, endISO);
+    } catch (e) {
+      setErr((e as Error).message || 'Save failed.');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/40"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-[14px] p-5 w-[360px] max-w-[92vw] shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="text-[13px] font-extrabold uppercase tracking-[0.5px] text-[#1a1a2e] mb-1">
+          Adjust session
+        </div>
+        <div className="text-[12px] text-[#888] mb-4 truncate">{taskTitle}</div>
+
+        {isLive && (
+          <div className="mb-4 p-2 rounded-md bg-[#fef3c7] text-[11px] text-[#78350f]">
+            This timer is still running. Stop it first, or just delete it.
+          </div>
+        )}
+
+        <label className="block text-[11px] font-bold uppercase tracking-[0.5px] text-[#888] mb-1">
+          Start
+        </label>
+        <input
+          type="datetime-local"
+          value={startVal}
+          onChange={(e) => setStartVal(e.target.value)}
+          disabled={isLive}
+          className="w-full mb-3 px-2 py-2 border border-[#e5e7eb] rounded-md text-[13px] disabled:bg-[#f3f4f6]"
+        />
+
+        <label className="block text-[11px] font-bold uppercase tracking-[0.5px] text-[#888] mb-1">
+          End
+        </label>
+        <input
+          type="datetime-local"
+          value={endVal}
+          onChange={(e) => setEndVal(e.target.value)}
+          disabled={isLive}
+          className="w-full mb-3 px-2 py-2 border border-[#e5e7eb] rounded-md text-[13px] disabled:bg-[#f3f4f6]"
+        />
+
+        {err && <div className="text-[11px] text-[#dc2626] mb-2">{err}</div>}
+
+        <div className="flex gap-2 mt-4">
+          <button
+            onClick={onDelete}
+            disabled={busy}
+            className="px-3 py-2 text-[12px] font-bold rounded-md bg-[#fee2e2] text-[#991b1b] hover:bg-[#fecaca] disabled:opacity-50"
+          >
+            Delete
+          </button>
+          <div className="flex-1" />
+          <button
+            onClick={onClose}
+            disabled={busy}
+            className="px-3 py-2 text-[12px] rounded-md bg-[#f3f4f6] text-[#1a1a2e] hover:bg-[#e5e7eb] disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          {isLive ? (
+            <button
+              onClick={onStopLive}
+              disabled={busy}
+              className="px-3 py-2 text-[12px] font-bold rounded-md bg-[#1a1a2e] text-white hover:opacity-90 disabled:opacity-50"
+            >
+              Stop now
+            </button>
+          ) : (
+            <button
+              onClick={handleSave}
+              disabled={busy}
+              className="px-3 py-2 text-[12px] font-bold rounded-md bg-[#1a1a2e] text-white hover:opacity-90 disabled:opacity-50"
+            >
+              Save
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// <input type="datetime-local"> wants "YYYY-MM-DDTHH:mm" in local time.
+// These two helpers round-trip between that and an ISO string.
+function toLocalInputValue(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function fromLocalInputValue(v: string): string | null {
+  if (!v) return null;
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
 }

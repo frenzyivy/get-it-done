@@ -382,16 +382,34 @@ export function ScheduleView() {
                   </Text>
                 ) : (
                   <>
-                    <Text
+                    <View
                       style={{
-                        ...M3Type.labelSmall,
-                        color: fg,
-                        textTransform: 'uppercase',
-                        opacity: 0.85,
+                        flexDirection: 'row',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
                       }}
                     >
-                      {onPlan ? 'On plan' : 'Off plan'}
-                    </Text>
+                      <Text
+                        style={{
+                          ...M3Type.labelSmall,
+                          color: fg,
+                          textTransform: 'uppercase',
+                          opacity: 0.9,
+                        }}
+                      >
+                        {onPlan ? 'Executed' : 'Off plan'}
+                      </Text>
+                      <Text
+                        style={{
+                          ...M3Type.labelSmall,
+                          color: fg,
+                          fontVariant: ['tabular-nums'],
+                          opacity: 0.9,
+                        }}
+                      >
+                        {secToMs((a.endHour - a.startHour) * 3600)}
+                      </Text>
+                    </View>
                     <Text
                       numberOfLines={2}
                       style={{ ...M3Type.bodyMedium, color: fg, marginTop: 2 }}
@@ -426,15 +444,43 @@ export function ScheduleView() {
                 zIndex: 5,
               }}
             >
-              <Text
+              <View
                 style={{
-                  ...M3Type.labelSmall,
-                  color: c.onPrimary,
-                  textTransform: 'uppercase',
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
                 }}
               >
-                Live
-              </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                  <View
+                    style={{
+                      width: 7,
+                      height: 7,
+                      borderRadius: 3.5,
+                      backgroundColor: c.error,
+                    }}
+                  />
+                  <Text
+                    style={{
+                      ...M3Type.labelSmall,
+                      color: c.onPrimary,
+                      textTransform: 'uppercase',
+                    }}
+                  >
+                    Live
+                  </Text>
+                </View>
+                <Text
+                  style={{
+                    ...M3Type.labelSmall,
+                    color: c.onPrimary,
+                    fontVariant: ['tabular-nums'],
+                    opacity: 0.9,
+                  }}
+                >
+                  {secToMs((nowHour - liveStartHour) * 3600)}
+                </Text>
+              </View>
               <Text
                 numberOfLines={2}
                 style={{ ...M3Type.bodyMedium, color: c.onPrimary, marginTop: 2 }}
@@ -516,6 +562,37 @@ export function ScheduleView() {
           )}
         </View>
       </ScrollView>
+
+      {/* FAB — bottom-right, opens the Plan-a-task composer */}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Plan a task"
+        onPress={() =>
+          openComposerAtHour(
+            Math.max(START_HOUR, Math.min(END_HOUR - 1, Math.floor(nowHour))),
+          )
+        }
+        style={{
+          position: 'absolute',
+          right: 18,
+          bottom: 24,
+          width: 56,
+          height: 56,
+          borderRadius: 16,
+          backgroundColor: c.primary,
+          alignItems: 'center',
+          justifyContent: 'center',
+          shadowColor: '#000',
+          shadowOpacity: 0.2,
+          shadowRadius: 8,
+          shadowOffset: { width: 0, height: 4 },
+          elevation: 6,
+        }}
+      >
+        <Text style={{ fontSize: 26, fontWeight: '700', color: c.onPrimary, marginTop: -2 }}>
+          +
+        </Text>
+      </Pressable>
 
       <BlockComposer
         visible={composerOpen}
