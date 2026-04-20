@@ -115,6 +115,13 @@ interface Store {
     mode?: FocusMode,
   ) => Promise<TrackedSession | null>;
   pauseSession: (sessionId: string) => Promise<void>;
+  autoPauseIdleSessions: (lastActivityMs: number, idleThresholdMs: number) => Promise<void>;
+  updateSessionTimes: (
+    sessionId: string,
+    startedAtISO: string,
+    endedAtISO: string,
+  ) => Promise<void>;
+  deleteSession: (sessionId: string) => Promise<void>;
   stopSession: (sessionId: string) => Promise<void>;
   persistActiveSessionDurations: () => Promise<void>;
   appendDriftEvent: (sessionId: string, drift: DriftEvent) => Promise<void>;
@@ -491,6 +498,79 @@ export const useStore = create<Store>((set, get) => ({
         duration_seconds: dur,
         was_paused: true,
       })
+      .eq('id', sessionId);
+    if (error) throw error;
+    set((s) => ({
+      activeSessions: s.activeSessions.filter((x) => x.id !== sessionId),
+      focusSessionId: s.focusSessionId === sessionId ? null : s.focusSessionId,
+    }));
+  },
+
+  // Activity-based idle auto-pause. For each running session, if the user has
+  // been idle longer than `idleThresholdMs`, end the session at the last-
+  // activity timestamp (not "now") so untracked idle time isn't attributed to
+  // work. Sessions younger than the threshold are untouched.
+  autoPauseIdleSessions: async (lastActivityMs, idleThresholdMs) => {
+    const { activeSessions } = get();
+    if (activeSessions.length === 0) return;
+    const idleFor = Date.now() - lastActivityMs;
+    if (idleFor < idleThresholdMs) return;
+    const endAtMs = lastActivityMs;
+    const endAtISO = new Date(endAtMs).toISOString();
+    const db = supabase();
+    const toPause = activeSessions.filter((s) => {
+      const start = new Date(s.started_at).getTime();
+      return endAtMs > start;
+    });
+    if (toPause.length === 0) return;
+    await Promise.all(
+      toPause.map((s) => {
+        const dur = Math.max(
+          0,
+          Math.floor((endAtMs - new Date(s.started_at).getTime()) / 1000),
+        );
+        return db
+          .from('tracked_sessions')
+          .update({ ended_at: endAtISO, duration_seconds: dur, was_paused: true })
+          .eq('id', s.id);
+      }),
+    );
+    const pausedIds = new Set(toPause.map((s) => s.id));
+    set((s) => ({
+      activeSessions: s.activeSessions.filter((x) => !pausedIds.has(x.id)),
+      focusSessionId:
+        s.focusSessionId && pausedIds.has(s.focusSessionId) ? null : s.focusSessionId,
+    }));
+  },
+
+  // Manually edit a session's start/end window. Used by the Timeline "Adjust"
+  // popover so users can trim an abandoned timer that painted too much time.
+  // Recomputes duration_seconds from the new window.
+  updateSessionTimes: async (sessionId, startedAtISO, endedAtISO) => {
+    const startMs = new Date(startedAtISO).getTime();
+    const endMs = new Date(endedAtISO).getTime();
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+      throw new Error('Invalid session window');
+    }
+    const dur = Math.floor((endMs - startMs) / 1000);
+    const { error } = await supabase()
+      .from('tracked_sessions')
+      .update({
+        started_at: startedAtISO,
+        ended_at: endedAtISO,
+        duration_seconds: dur,
+      })
+      .eq('id', sessionId);
+    if (error) throw error;
+    set((s) => ({
+      activeSessions: s.activeSessions.filter((x) => x.id !== sessionId),
+    }));
+  },
+
+  deleteSession: async (sessionId) => {
+    const { error } = await supabase()
+      .from('tracked_sessions')
+      .delete()
       .eq('id', sessionId);
     if (error) throw error;
     set((s) => ({

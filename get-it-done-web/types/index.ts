@@ -74,6 +74,9 @@ export interface UserPrefs {
   announce_focus_sessions: boolean;
   focus_announce_phrase: string;
   default_timer_mode: FocusMode;
+  // Weekly work-hours goal used by the Timeline footer's Goal pie card.
+  // Week is Sun → Sat in local time; goal is the target for the whole week.
+  weekly_work_goal_hours: number;
 }
 
 export interface AutomationRule {
