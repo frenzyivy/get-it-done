@@ -1,8 +1,9 @@
-import { Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useTheme } from 'react-native-paper';
 import { useStore } from '@/lib/store';
+import { useUI } from '@/lib/ui-context';
 import { fmtShort, isToday } from '@/lib/utils';
 import { type as M3Type } from '@/lib/theme';
 
@@ -64,6 +65,7 @@ export function TodayCard() {
   const c = theme.colors;
   const tasks = useStore((s) => s.tasks);
   const profile = useStore((s) => s.profileV2);
+  const { openTodayFive } = useUI();
 
   const total = profile?.daily_task_goal ?? 3;
   const streak = profile?.current_streak ?? 0;
@@ -87,19 +89,22 @@ export function TodayCard() {
   const pct = total > 0 ? completedToday / total : 0;
 
   return (
-    <View
-      style={{
+    <Pressable
+      onPress={openTodayFive}
+      accessibilityRole="button"
+      accessibilityLabel="Open Today's 5"
+      style={({ pressed }) => ({
         marginTop: 16,
         marginHorizontal: 16,
         padding: 16,
         borderRadius: 16,
-        backgroundColor: c.elevation.level1,
+        backgroundColor: pressed ? c.elevation.level2 : c.elevation.level1,
         borderWidth: 1,
         borderColor: c.outlineVariant,
         flexDirection: 'row',
         alignItems: 'center',
         gap: 16,
-      }}
+      })}
     >
       <Ring
         pct={pct}
@@ -139,6 +144,6 @@ export function TodayCard() {
           {streak}
         </Text>
       </View>
-    </View>
+    </Pressable>
   );
 }

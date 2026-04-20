@@ -4,24 +4,35 @@ import { useTheme } from 'react-native-paper';
 
 interface Props {
   onPress: () => void;
+  onLongPress?: () => void;
   accessibilityLabel?: string;
 }
 
-export function FAB({ onPress, accessibilityLabel = 'Add task' }: Props) {
+export function FAB({
+  onPress,
+  onLongPress,
+  accessibilityLabel = 'Add task',
+}: Props) {
   const theme = useTheme();
   const c = theme.colors;
 
   return (
     <Pressable
       onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={350}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
+      accessibilityHint={
+        onLongPress ? 'Long-press to start a focus session' : undefined
+      }
       style={({ pressed }) => ({
         position: 'absolute',
-        right: 16,
+        right: 18,
         bottom: 96,
         width: 56,
         height: 56,
+        zIndex: 50,
         borderRadius: 16,
         alignItems: 'center',
         justifyContent: 'center',

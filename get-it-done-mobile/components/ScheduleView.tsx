@@ -12,8 +12,9 @@ import DateTimePicker, {
 } from '@react-native-community/datetimepicker';
 import { useTheme } from 'react-native-paper';
 import { useStore } from '@/lib/store';
+import { supabase } from '@/lib/supabase';
 import { type as M3Type } from '@/lib/theme';
-import type { PlannedBlock, TaskType } from '@/types';
+import type { PlannedBlock, TaskType, TrackedSession } from '@/types';
 
 const START_HOUR = 6;
 const END_HOUR = 22;
@@ -58,6 +59,7 @@ export function ScheduleView() {
   const addPlannedBlock = useStore((s) => s.addPlannedBlock);
   const deletePlannedBlock = useStore((s) => s.deletePlannedBlock);
   const activeSessions = useStore((s) => s.activeSessions);
+  const fetchActiveSessions = useStore((s) => s.fetchActiveSessions);
   const userId = useStore((s) => s.userId);
 
   const scrollRef = useRef<ScrollView>(null);
@@ -84,14 +86,40 @@ export function ScheduleView() {
   useEffect(() => {
     if (!userId) return;
     void fetchPlannedBlocks(dayStart.toISOString(), dayEnd.toISOString());
-  }, [userId, fetchPlannedBlocks, dayStart, dayEnd]);
+    // Refresh active sessions whenever the Day view mounts — sessions can be
+    // started on web or on a different mobile screen, and the store is only
+    // hydrated once at boot otherwise.
+    void fetchActiveSessions();
+  }, [userId, fetchPlannedBlocks, fetchActiveSessions, dayStart, dayEnd]);
+
+  // Today's tracked sessions (v2 table). The legacy `task.sessions` array only
+  // holds rows from `time_sessions` and is no longer where new work lands.
+  const [trackedToday, setTrackedToday] = useState<TrackedSession[]>([]);
+  useEffect(() => {
+    if (!userId) return;
+    void (async () => {
+      const { data } = await supabase
+        .from('tracked_sessions')
+        .select('*')
+        .eq('user_id', userId)
+        .gte('started_at', dayStart.toISOString())
+        .lt('started_at', dayEnd.toISOString())
+        .order('started_at', { ascending: true });
+      setTrackedToday((data ?? []) as TrackedSession[]);
+    })();
+  }, [userId, dayStart, dayEnd, nowMs]);
 
   useEffect(() => {
     // Tick every 30s — fine-grained enough for the Live block + NOW line to
-    // move visibly, cheap enough to not thrash React.
-    const id = setInterval(() => setNowMs(Date.now()), 30_000);
+    // move visibly, cheap enough to not thrash React. Also re-pull active
+    // sessions so a session started elsewhere (web, FAB long-press from
+    // another tab) shows up without remounting the Day view.
+    const id = setInterval(() => {
+      setNowMs(Date.now());
+      void fetchActiveSessions();
+    }, 30_000);
     return () => clearInterval(id);
-  }, []);
+  }, [fetchActiveSessions]);
 
   const nowHour = (nowMs - dayStart.getTime()) / 3_600_000;
 
@@ -109,24 +137,26 @@ export function ScheduleView() {
     [plannedBlocks, tasks, dayStart],
   );
 
-  // Actual blocks: TimeSession history whose started_at is today.
+  // Actual blocks: TrackedSession history whose started_at is today.
+  // Orphaned sessions (no ended_at + no duration) are skipped so we don't
+  // paint a giant bar across unworked time.
   const actualBlocks: PlacedBlock[] = useMemo(() => {
     const out: PlacedBlock[] = [];
-    for (const t of tasks) {
-      for (const s of t.sessions) {
-        const startMs = new Date(s.started_at).getTime();
-        if (startMs < dayStart.getTime() || startMs >= dayEnd.getTime()) continue;
-        const startH = (startMs - dayStart.getTime()) / 3_600_000;
-        out.push({
-          id: s.id,
-          task: t,
-          startHour: startH,
-          endHour: startH + s.duration_seconds / 3600,
-        });
-      }
+    for (const s of trackedToday) {
+      const dur = s.duration_seconds ?? 0;
+      if (!s.ended_at && dur <= 0) continue;
+      const task = tasks.find((t) => t.id === s.task_id);
+      const startMs = new Date(s.started_at).getTime();
+      const startH = (startMs - dayStart.getTime()) / 3_600_000;
+      out.push({
+        id: s.id,
+        task,
+        startHour: startH,
+        endHour: startH + dur / 3600,
+      });
     }
     return out;
-  }, [tasks, dayStart, dayEnd]);
+  }, [trackedToday, tasks, dayStart]);
 
   const liveSession = activeSessions[activeSessions.length - 1] ?? null;
   const liveTask = liveSession
@@ -256,7 +286,10 @@ export function ScheduleView() {
             minHeight: railInnerHeight + 16,
           }}
         >
-          {/* Hour rail — tap an empty hour to plan a block at that time */}
+          {/* Hour rail rows — tap an empty hour to plan a block at that time.
+              Labels live in the row (left: -RAIL_W + 8 puts them in the gutter)
+              and the row itself has overflow: 'visible' so Android doesn't
+              clip the label out of the row's bounds. */}
           {Array.from({ length: END_HOUR - START_HOUR + 1 }).map((_, i) => {
             const hr = START_HOUR + i;
             return (
@@ -266,25 +299,32 @@ export function ScheduleView() {
                 accessibilityRole="button"
                 accessibilityLabel={`Plan a block at ${String(hr).padStart(2, '0')}:00`}
                 style={({ pressed }) => ({
-                  position: 'relative',
                   height: HOUR_H,
                   borderTopWidth: 1,
                   borderTopColor: c.outlineVariant,
                   backgroundColor: pressed ? c.elevation.level1 : 'transparent',
+                  overflow: 'visible',
                 })}
               >
-                <Text
+                <View
+                  pointerEvents="none"
                   style={{
                     position: 'absolute',
                     left: -RAIL_W + 8,
                     top: -8,
-                    ...M3Type.labelSmall,
-                    fontVariant: ['tabular-nums'],
-                    color: c.onSurfaceVariant,
+                    width: RAIL_W,
                   }}
                 >
-                  {String(hr).padStart(2, '0')}:00
-                </Text>
+                  <Text
+                    style={{
+                      ...M3Type.labelSmall,
+                      fontVariant: ['tabular-nums'],
+                      color: c.onSurfaceVariant,
+                    }}
+                  >
+                    {String(hr).padStart(2, '0')}:00
+                  </Text>
+                </View>
               </Pressable>
             );
           })}
@@ -423,7 +463,7 @@ export function ScheduleView() {
           })}
 
           {/* Live block — primary fill, from live start to now */}
-          {liveStartHour !== null && liveTask && nowHour > liveStartHour && (
+          {liveStartHour !== null && liveTask && nowHour >= liveStartHour && (
             <View
               style={{
                 position: 'absolute',
@@ -496,10 +536,10 @@ export function ScheduleView() {
               pointerEvents="none"
               style={{
                 position: 'absolute',
-                left: RAIL_W - 10,
+                left: RAIL_W - 12,
                 right: 16,
                 top: nowTopPx + 8,
-                height: 2,
+                height: 3,
                 backgroundColor: c.error,
                 zIndex: 10,
               }}
@@ -507,11 +547,11 @@ export function ScheduleView() {
               <View
                 style={{
                   position: 'absolute',
-                  left: 0,
-                  top: -4,
-                  width: 10,
-                  height: 10,
-                  borderRadius: 5,
+                  left: -6,
+                  top: -5,
+                  width: 12,
+                  height: 12,
+                  borderRadius: 6,
                   backgroundColor: c.error,
                 }}
               />
@@ -519,8 +559,9 @@ export function ScheduleView() {
                 style={{
                   position: 'absolute',
                   right: 0,
-                  top: -18,
-                  ...M3Type.labelSmall,
+                  top: -20,
+                  ...M3Type.labelMedium,
+                  fontWeight: '700',
                   color: c.error,
                   fontVariant: ['tabular-nums'],
                 }}
@@ -530,37 +571,34 @@ export function ScheduleView() {
             </View>
           )}
 
-          {/* Empty-day CTA */}
-          {placedPlanned.length === 0 && (
-            <View
-              pointerEvents="box-none"
+        </View>
+
+        {/* Empty-day CTA — sits below the grid so it never covers the NOW
+            line or the live block. */}
+        {placedPlanned.length === 0 && (
+          <View style={{ alignItems: 'center', marginTop: 24, marginBottom: 16 }}>
+            <Pressable
+              onPress={() =>
+                openComposerAtHour(
+                  Math.max(START_HOUR, Math.min(END_HOUR - 1, Math.floor(nowHour))),
+                )
+              }
               style={{
-                position: 'absolute',
-                left: RAIL_W,
-                right: 16,
-                top: railInnerHeight / 2,
+                paddingHorizontal: 16,
+                height: 40,
+                borderRadius: 20,
+                borderWidth: 1,
+                borderColor: c.outline,
                 alignItems: 'center',
+                justifyContent: 'center',
               }}
             >
-              <Pressable
-                onPress={() => openComposerAtHour(Math.max(START_HOUR, Math.min(END_HOUR - 1, Math.floor(nowHour))))}
-                style={{
-                  paddingHorizontal: 16,
-                  height: 40,
-                  borderRadius: 20,
-                  borderWidth: 1,
-                  borderColor: c.outline,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <Text style={{ ...M3Type.labelLarge, color: c.onSurface }}>
-                  + Plan a task
-                </Text>
-              </Pressable>
-            </View>
-          )}
-        </View>
+              <Text style={{ ...M3Type.labelLarge, color: c.onSurface }}>
+                + Plan a task
+              </Text>
+            </Pressable>
+          </View>
+        )}
       </ScrollView>
 
       {/* FAB — bottom-right, opens the Plan-a-task composer */}

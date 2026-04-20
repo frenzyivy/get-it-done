@@ -329,50 +329,94 @@ export function TaskItem({ task }: Props) {
           {/* Subtask list */}
           {open && subCount > 0 && (
             <View style={{ marginTop: 8, gap: 8 }}>
-              {task.subtasks.map((s) => (
-                <Pressable
-                  key={s.id}
-                  onPress={() => void toggleSubtask(task.id, s.id)}
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 10,
-                  }}
-                >
+              {task.subtasks.map((s) => {
+                const runningForThisSub = activeSessions.find(
+                  (x) => x.subtask_id === s.id,
+                );
+                const isTrackingThisSub = Boolean(runningForThisSub);
+                return (
                   <View
-                    accessibilityRole="checkbox"
-                    accessibilityState={{ checked: s.is_done }}
+                    key={s.id}
                     style={{
-                      width: 16,
-                      height: 16,
-                      borderRadius: 2,
-                      borderWidth: s.is_done ? 0 : 1.5,
-                      borderColor: c.onSurfaceVariant,
-                      backgroundColor: s.is_done ? c.primary : 'transparent',
+                      flexDirection: 'row',
                       alignItems: 'center',
-                      justifyContent: 'center',
+                      gap: 10,
+                      paddingLeft: isTrackingThisSub ? 7 : 0,
+                      borderLeftWidth: isTrackingThisSub ? 3 : 0,
+                      borderLeftColor: c.primary,
                     }}
                   >
-                    {s.is_done && (
+                    <Pressable
+                      onPress={() => void toggleSubtask(task.id, s.id)}
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked: s.is_done }}
+                      hitSlop={6}
+                      style={{
+                        width: 16,
+                        height: 16,
+                        borderRadius: 2,
+                        borderWidth: s.is_done ? 0 : 1.5,
+                        borderColor: c.onSurfaceVariant,
+                        backgroundColor: s.is_done ? c.primary : 'transparent',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      {s.is_done && (
+                        <MaterialCommunityIcons
+                          name="check"
+                          size={12}
+                          color={c.onPrimary}
+                        />
+                      )}
+                    </Pressable>
+                    <Pressable
+                      onPress={() => void toggleSubtask(task.id, s.id)}
+                      style={{ flex: 1 }}
+                    >
+                      <Text
+                        style={{
+                          ...M3Type.bodyMedium,
+                          color: s.is_done ? c.onSurfaceVariant : c.onSurface,
+                          textDecorationLine: s.is_done ? 'line-through' : 'none',
+                        }}
+                      >
+                        {s.title}
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => {
+                        if (isTrackingThisSub && runningForThisSub) {
+                          void stopSession(runningForThisSub.id);
+                        } else {
+                          void startTrackingTask(task.id, s.id);
+                        }
+                      }}
+                      hitSlop={6}
+                      accessibilityRole="button"
+                      accessibilityLabel={
+                        isTrackingThisSub ? 'Stop subtask timer' : 'Start subtask timer'
+                      }
+                      style={{
+                        width: 28,
+                        height: 28,
+                        borderRadius: 14,
+                        backgroundColor: isTrackingThisSub
+                          ? c.primary
+                          : c.elevation.level2,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
                       <MaterialCommunityIcons
-                        name="check"
-                        size={12}
-                        color={c.onPrimary}
+                        name={isTrackingThisSub ? 'stop' : 'play'}
+                        size={14}
+                        color={isTrackingThisSub ? c.onPrimary : c.primary}
                       />
-                    )}
+                    </Pressable>
                   </View>
-                  <Text
-                    style={{
-                      ...M3Type.bodyMedium,
-                      color: s.is_done ? c.onSurfaceVariant : c.onSurface,
-                      textDecorationLine: s.is_done ? 'line-through' : 'none',
-                      flex: 1,
-                    }}
-                  >
-                    {s.title}
-                  </Text>
-                </Pressable>
-              ))}
+                );
+              })}
             </View>
           )}
         </Pressable>

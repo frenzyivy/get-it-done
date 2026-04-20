@@ -21,6 +21,14 @@ import {
 } from '@/components/EditTaskSheet';
 import { FocusModeScreen } from '@/components/FocusModeScreen';
 import {
+  FocusLockPickerSheet,
+  type FocusLockPickerHandle,
+} from '@/components/FocusLockPickerSheet';
+import {
+  RecurringTemplatesSheet,
+  type RecurringTemplatesHandle,
+} from '@/components/RecurringTemplatesSheet';
+import {
   TodayFiveSheet,
   type TodayFiveSheetHandle,
 } from '@/components/TodayFiveSheet';
@@ -55,6 +63,8 @@ export default function TabsLayout() {
   const notifSheetRef = useRef<NotificationSheetHandle>(null);
   const editSheetRef = useRef<EditTaskSheetHandle>(null);
   const todayFiveSheetRef = useRef<TodayFiveSheetHandle>(null);
+  const focusLockPickerRef = useRef<FocusLockPickerHandle>(null);
+  const recurringSheetRef = useRef<RecurringTemplatesHandle>(null);
 
   const openAddTask = useCallback((status: Status = 'todo') => {
     addSheetRef.current?.open(status);
@@ -65,6 +75,15 @@ export default function TabsLayout() {
   const openTodayFive = useCallback(() => {
     todayFiveSheetRef.current?.open();
   }, []);
+  const openFocusLockPicker = useCallback(
+    (taskId: string, subtaskId: string | null = null) => {
+      focusLockPickerRef.current?.open(taskId, subtaskId);
+    },
+    [],
+  );
+  const openRecurringTemplates = useCallback(() => {
+    recurringSheetRef.current?.open();
+  }, []);
 
   useEffect(() => {
     if (!userId || !prefs) return;
@@ -73,7 +92,15 @@ export default function TabsLayout() {
   }, [userId, prefs]);
 
   return (
-    <UIProvider value={{ openAddTask, openEditTask, openTodayFive }}>
+    <UIProvider
+      value={{
+        openAddTask,
+        openEditTask,
+        openTodayFive,
+        openFocusLockPicker,
+        openRecurringTemplates,
+      }}
+    >
       <SafeAreaView
         style={{ flex: 1, backgroundColor: theme.colors.background }}
         edges={['top']}
@@ -112,13 +139,36 @@ export default function TabsLayout() {
           </Tabs>
         </View>
 
-        <FAB onPress={() => openAddTask('todo')} />
+        {/* Global add-task FAB — hidden on Day (has its own Plan FAB) and
+            Settings (no task surface). */}
+        {routeKey !== 'schedule' && routeKey !== 'settings' && (
+        <FAB
+          onPress={() => openAddTask('todo')}
+          onLongPress={() => {
+            // Long-press = "start a focus session on my #1 Today task".
+            // If there is no Today plan, fall back to first in-progress or
+            // first todo. If nothing at all, fall through to Add Task.
+            const { tasks } = useStore.getState();
+            const today = new Date().toISOString().slice(0, 10);
+            const pick =
+              tasks.find(
+                (t) => t.planned_for_date === today && t.status !== 'done',
+              ) ??
+              tasks.find((t) => t.status === 'in_progress') ??
+              tasks.find((t) => t.status === 'todo');
+            if (pick) openFocusLockPicker(pick.id);
+            else openAddTask('todo');
+          }}
+        />
+        )}
 
         <TagManagerSheet ref={tagSheetRef} />
         <AddTaskSheet ref={addSheetRef} />
         <NotificationSheet ref={notifSheetRef} />
         <EditTaskSheet ref={editSheetRef} />
         <TodayFiveSheet ref={todayFiveSheetRef} />
+        <FocusLockPickerSheet ref={focusLockPickerRef} />
+        <RecurringTemplatesSheet ref={recurringSheetRef} />
         <RolloverPromptSheet />
         <FocusModeScreen />
       </SafeAreaView>
