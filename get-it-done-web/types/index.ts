@@ -223,7 +223,7 @@ export interface NewTaskInput {
 }
 
 // Insights page — range passed to /api/insights?range=...
-export type InsightsRange = 'week' | 'month' | 'all';
+export type InsightsRange = 'today' | 'week' | 'month' | 'all';
 
 export interface InsightsBucket {
   id: string;

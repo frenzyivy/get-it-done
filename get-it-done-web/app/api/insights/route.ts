@@ -62,6 +62,15 @@ function monthStartLocal(tz: string, now: Date): Date {
   return tzDateToUtc(`${parts.year}-${parts.month}-01`, '00:00:00', tz);
 }
 
+function todayStartLocal(tz: string, now: Date): Date {
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  });
+  const parts = Object.fromEntries(fmt.formatToParts(now).map((p) => [p.type, p.value]));
+  return tzDateToUtc(`${parts.year}-${parts.month}-${parts.day}`, '00:00:00', tz);
+}
+
 // Given a local calendar date (YYYY-MM-DD) + time in the given IANA timezone,
 // return the corresponding UTC Date. Works by probing UTC ± tz offset.
 function tzDateToUtc(dateISO: string, time: string, tz: string): Date {
@@ -84,6 +93,13 @@ function resolveRange(range: InsightsRange, tz: string): { start: Date | null; e
   const end = new Date();
   if (range === 'all') {
     return { start: null, end, prevStart: null, prevEnd: null };
+  }
+  if (range === 'today') {
+    const start = todayStartLocal(tz, end);
+    // DST-safe yesterday midnight: re-probe from (start - 1ms) rather than
+    // subtracting 24h, which drifts by an hour across DST transitions.
+    const prevStart = todayStartLocal(tz, new Date(start.getTime() - 1));
+    return { start, end, prevStart, prevEnd: start };
   }
   if (range === 'week') {
     const start = weekStartSunLocal(tz, end);
@@ -137,7 +153,7 @@ export async function GET(req: Request) {
 
   const { searchParams } = new URL(req.url);
   const range = (searchParams.get('range') ?? 'month') as InsightsRange;
-  if (!['week', 'month', 'all'].includes(range)) {
+  if (!['today', 'week', 'month', 'all'].includes(range)) {
     return withCors(Response.json({ error: 'invalid range' }, { status: 400 }));
   }
 

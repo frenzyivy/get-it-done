@@ -13,6 +13,13 @@ import {
   DMSans_700Bold,
   DMSans_800ExtraBold,
 } from '@expo-google-fonts/dm-sans';
+import {
+  WorkSans_400Regular,
+  WorkSans_500Medium,
+  WorkSans_600SemiBold,
+  WorkSans_700Bold,
+  WorkSans_800ExtraBold,
+} from '@expo-google-fonts/work-sans';
 import { supabase } from '@/lib/supabase';
 import { useStore } from '@/lib/store';
 import { ThemeProvider, useAppTheme } from '@/lib/theme-context';
@@ -24,6 +31,11 @@ export default function RootLayout() {
     DMSans_600SemiBold,
     DMSans_700Bold,
     DMSans_800ExtraBold,
+    WorkSans_400Regular,
+    WorkSans_500Medium,
+    WorkSans_600SemiBold,
+    WorkSans_700Bold,
+    WorkSans_800ExtraBold,
   });
 
   return (

@@ -224,3 +224,67 @@ export interface PlannedBlock {
   block_type: 'work' | 'break' | 'lunch' | 'meeting';
   notes: string | null;
 }
+
+// Insights — mirrors get-it-done-web/types/index.ts. Mobile adds 'today'.
+export type InsightsRange = 'today' | 'week' | 'month' | 'all';
+
+export interface InsightsBucket {
+  id: string;
+  name: string;
+  color: string;
+  total_seconds: number;
+}
+
+export interface InsightsProjectBucket extends InsightsBucket {
+  status: 'active' | 'paused' | 'archived';
+  task_count: number;
+}
+
+export interface InsightsTagBucket {
+  id: string;
+  name: string;
+  total_seconds: number;
+}
+
+export interface InsightsMatrixRow {
+  project_id: string;
+  project_name: string;
+  project_color: string;
+  cells: Record<string, number>;
+  total_seconds: number;
+}
+
+export interface InsightsTask {
+  id: string;
+  title: string;
+  total_seconds: number;
+  categories: { id: string; name: string; color: string }[];
+}
+
+export interface InsightsSummary {
+  total_seconds: number;
+  total_seconds_prev: number;
+  task_count: number;
+  top_category: InsightsBucket | null;
+  top_category_pct: number;
+  top_project: InsightsProjectBucket | null;
+  deepest_day: { date: string; total_seconds: number } | null;
+}
+
+export interface InsightsPayload {
+  range: InsightsRange;
+  range_start: string | null;
+  range_end: string;
+  summary: InsightsSummary;
+  categories: InsightsBucket[];
+  projects: InsightsProjectBucket[];
+  matrix: {
+    category_order: { id: string; name: string; color: string }[];
+    rows: InsightsMatrixRow[];
+  };
+  tasks_by_project: Record<string, InsightsTask[]>;
+  categories_by_project: Record<string, InsightsBucket[]>;
+  tags: InsightsTagBucket[];
+  categories_by_tag: Record<string, InsightsBucket[]>;
+  missing_label_schema?: boolean;
+}

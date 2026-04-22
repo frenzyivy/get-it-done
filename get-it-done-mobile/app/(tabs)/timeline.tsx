@@ -1,5 +1,5 @@
-import { TimelineView } from '@/components/TimelineView';
+import { InsightsView } from '@/components/InsightsView';
 
 export default function TimelineScreen() {
-  return <TimelineView />;
+  return <InsightsView />;
 }
