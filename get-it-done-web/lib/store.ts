@@ -3,6 +3,9 @@ import { supabase } from './supabase';
 import type {
   TaskType,
   TagType,
+  CategoryType,
+  ProjectType,
+  ProjectStatus,
   SubtaskType,
   TimeSession,
   ViewMode,
@@ -16,6 +19,10 @@ import type {
   PlannedBlock,
   FocusMode,
   DriftEvent,
+  RecurringTemplate,
+  NewRecurringTemplateInput,
+  InsightsPayload,
+  InsightsRange,
 } from '@/types';
 
 interface TaskRow {
@@ -33,6 +40,8 @@ interface TaskRow {
   planned_for_date: string | null;
   subtasks: SubtaskType[] | null;
   task_tags: { tag_id: string }[] | null;
+  task_categories: { category_id: string }[] | null;
+  task_projects: { project_id: string }[] | null;
   time_sessions: TimeSession[] | null;
 }
 
@@ -54,6 +63,8 @@ function rowToTask(row: TaskRow): TaskType {
     allow_alarms: row.allow_alarms ?? false,
     planned_for_date: row.planned_for_date ?? null,
     tag_ids: (row.task_tags ?? []).map((t) => t.tag_id),
+    category_ids: (row.task_categories ?? []).map((c) => c.category_id),
+    project_ids: (row.task_projects ?? []).map((p) => p.project_id),
     subtasks,
     sessions: row.time_sessions ?? [],
   };
@@ -62,6 +73,8 @@ function rowToTask(row: TaskRow): TaskType {
 interface Store {
   tasks: TaskType[];
   tags: TagType[];
+  categories: CategoryType[];
+  projects: ProjectType[];
   view: ViewMode;
   userId: string | null;
   loading: boolean;
@@ -75,6 +88,8 @@ interface Store {
   setUserId: (id: string | null) => void;
 
   fetchTags: () => Promise<void>;
+  fetchCategories: () => Promise<void>;
+  fetchProjects: () => Promise<void>;
   fetchTasks: () => Promise<void>;
   fetchAll: () => Promise<void>;
 
@@ -98,6 +113,10 @@ interface Store {
   lastStopSummary: { durationSeconds: number; at: number } | null;
   // New-spec-1 Feature 5 — which session the focus-mode fullscreen is showing.
   focusSessionId: string | null;
+  // Focus Lock — target task/subtask while the picker sheet is open. null = closed.
+  focusLockPicker: { taskId: string; subtaskId: string | null } | null;
+  openFocusLockPicker: (taskId: string, subtaskId?: string | null) => void;
+  closeFocusLockPicker: () => void;
   fetchProfileV2: () => Promise<void>;
   // "Today's 5" rollover prompt — persists the date the prompt last fired so
   // it only shows once per calendar day.
@@ -113,7 +132,10 @@ interface Store {
     taskId: string,
     subtaskId?: string | null,
     mode?: FocusMode,
+    plannedDurationSeconds?: number | null,
   ) => Promise<TrackedSession | null>;
+  completeSession: (sessionId: string) => Promise<void>;
+  markSessionBroken: (sessionId: string, reason: string) => Promise<void>;
   pauseSession: (sessionId: string) => Promise<void>;
   autoPauseIdleSessions: (lastActivityMs: number, idleThresholdMs: number) => Promise<void>;
   updateSessionTimes: (
@@ -129,6 +151,16 @@ interface Store {
   openFocusMode: (sessionId: string) => void;
   closeFocusMode: () => void;
   clearStopSummary: () => void;
+
+  recurringTemplates: RecurringTemplate[];
+  fetchRecurringTemplates: () => Promise<void>;
+  addRecurringTemplate: (input: NewRecurringTemplateInput) => Promise<void>;
+  updateRecurringTemplate: (
+    id: string,
+    updates: Partial<NewRecurringTemplateInput>,
+  ) => Promise<void>;
+  deleteRecurringTemplate: (id: string) => Promise<void>;
+  toggleRecurringTemplate: (id: string, isEnabled: boolean) => Promise<void>;
 
   plannedBlocks: PlannedBlock[];
   fetchPlannedBlocks: (fromISO: string, toISO: string) => Promise<void>;
@@ -158,11 +190,54 @@ interface Store {
   addTag: (name: string, color: string) => Promise<void>;
   deleteTag: (id: string) => Promise<void>;
   updateTaskTags: (taskId: string, tagIds: string[]) => Promise<void>;
+
+  // Categories (AGENT1) — parallel to tags. CRUD goes via /api/categories so
+  // mobile and web share one implementation.
+  addCategory: (name: string, color?: string) => Promise<CategoryType | null>;
+  updateCategory: (id: string, updates: { name?: string; color?: string }) => Promise<void>;
+  deleteCategory: (id: string) => Promise<void>;
+  attachCategoryToTask: (taskId: string, categoryId: string) => Promise<void>;
+  detachCategoryFromTask: (taskId: string, categoryId: string) => Promise<void>;
+  updateTaskCategories: (taskId: string, categoryIds: string[]) => Promise<void>;
+
+  // Projects (AGENT1) — same shape as categories, plus status.
+  addProject: (
+    name: string,
+    color?: string,
+    status?: ProjectStatus,
+  ) => Promise<ProjectType | null>;
+  updateProject: (
+    id: string,
+    updates: { name?: string; color?: string; status?: ProjectStatus },
+  ) => Promise<void>;
+  setProjectStatus: (id: string, status: ProjectStatus) => Promise<void>;
+  deleteProject: (id: string) => Promise<void>;
+  attachProjectToTask: (taskId: string, projectId: string) => Promise<void>;
+  detachProjectFromTask: (taskId: string, projectId: string) => Promise<void>;
+  updateTaskProjects: (taskId: string, projectIds: string[]) => Promise<void>;
+
+  // Insights page state. Payload cached per-range for 60s to keep the
+  // range-toggle snappy. `selectedProjectId` / `selectedTagId` are client-only
+  // drill-down picks; they reset when the payload changes.
+  insightsRange: InsightsRange;
+  insightsPayload: InsightsPayload | null;
+  insightsLoading: boolean;
+  insightsError: string | null;
+  insightsFetchedAt: number;
+  insightsFetchedForRange: InsightsRange | null;
+  insightsSelectedProjectId: string | null;
+  insightsSelectedTagId: string | null;
+  setInsightsRange: (range: InsightsRange) => void;
+  fetchInsights: (force?: boolean) => Promise<void>;
+  setInsightsSelectedProject: (id: string | null) => void;
+  setInsightsSelectedTag: (id: string | null) => void;
 }
 
 export const useStore = create<Store>((set, get) => ({
   tasks: [],
   tags: [],
+  categories: [],
+  projects: [],
   view: 'kanban',
   userId: null,
   loading: false,
@@ -177,8 +252,13 @@ export const useStore = create<Store>((set, get) => ({
 
   fetchAll: async () => {
     set({ loading: true });
-    await Promise.all([
+    // allSettled so one failing fetcher (e.g. categories before its migration
+    // runs) doesn't prevent tasks / tags / prefs from loading. Failures are
+    // logged so the underlying issue is still visible in devtools.
+    const results = await Promise.allSettled([
       get().fetchTags(),
+      get().fetchCategories(),
+      get().fetchProjects(),
       get().fetchTasks(),
       get().fetchNotifications(),
       get().fetchPrefs(),
@@ -186,6 +266,9 @@ export const useStore = create<Store>((set, get) => ({
       get().fetchProfileV2(),
       get().fetchActiveSessions(),
     ]);
+    for (const r of results) {
+      if (r.status === 'rejected') console.error('[store.fetchAll]', r.reason);
+    }
     set({ loading: false });
     get().subscribeNotifications();
   },
@@ -416,7 +499,12 @@ export const useStore = create<Store>((set, get) => ({
   // Starts a new timer WITHOUT stopping any existing ones (Feature 4).
   // If a timer for this exact (task_id, subtask_id) pair is already running,
   // it's returned as-is — double-clicking the play icon is idempotent.
-  startTrackingTask: async (taskId, subtaskId = null, mode = 'open') => {
+  startTrackingTask: async (
+    taskId,
+    subtaskId = null,
+    mode = 'open',
+    plannedDurationSeconds = null,
+  ) => {
     const { userId, activeSessions } = get();
     if (!userId) return null;
     const existing = activeSessions.find(
@@ -431,6 +519,7 @@ export const useStore = create<Store>((set, get) => ({
         subtask_id: subtaskId,
         started_at: new Date().toISOString(),
         mode,
+        planned_duration_seconds: plannedDurationSeconds,
       })
       .select()
       .single();
@@ -478,6 +567,43 @@ export const useStore = create<Store>((set, get) => ({
       lastStopSummary: { durationSeconds: dur, at: Date.now() },
       focusSessionId: s.focusSessionId === sessionId ? null : s.focusSessionId,
     }));
+  },
+
+  // Focus Lock — planned duration hit zero. Stops the session and re-pulls
+  // the profile so the streak (bumped by the SQL trigger) reflects the new count.
+  completeSession: async (sessionId) => {
+    await get().stopSession(sessionId);
+    await get().fetchProfileV2();
+  },
+
+  // Focus Lock — user exited a Strict session early. Writes broken=true +
+  // reason, ends the session. A DB trigger resets the streak to 0; re-fetch
+  // profileV2 so the UI reflects that immediately.
+  markSessionBroken: async (sessionId, reason) => {
+    const { activeSessions } = get();
+    const sess = activeSessions.find((s) => s.id === sessionId);
+    if (!sess) return;
+    const now = new Date();
+    const dur = Math.max(
+      0,
+      Math.floor((now.getTime() - new Date(sess.started_at).getTime()) / 1000),
+    );
+    const { error } = await supabase()
+      .from('tracked_sessions')
+      .update({
+        ended_at: now.toISOString(),
+        duration_seconds: dur,
+        broken: true,
+        broken_reason: reason,
+      })
+      .eq('id', sessionId);
+    if (error) throw error;
+    set((s) => ({
+      activeSessions: s.activeSessions.filter((x) => x.id !== sessionId),
+      lastStopSummary: { durationSeconds: dur, at: Date.now() },
+      focusSessionId: s.focusSessionId === sessionId ? null : s.focusSessionId,
+    }));
+    await get().fetchProfileV2();
   },
 
   // Pause is modeled as stop + was_paused=true; resume creates a new row. This
@@ -629,9 +755,78 @@ export const useStore = create<Store>((set, get) => ({
   openFocusMode: (sessionId) => set({ focusSessionId: sessionId }),
   closeFocusMode: () => set({ focusSessionId: null }),
 
+  focusLockPicker: null,
+  openFocusLockPicker: (taskId, subtaskId = null) =>
+    set({ focusLockPicker: { taskId, subtaskId } }),
+  closeFocusLockPicker: () => set({ focusLockPicker: null }),
+
   clearStopSummary: () => set({ lastStopSummary: null }),
 
   plannedBlocks: [],
+
+  recurringTemplates: [],
+
+  fetchRecurringTemplates: async () => {
+    const { userId } = get();
+    if (!userId) return;
+    const { data, error } = await supabase()
+      .from('recurring_templates')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    set({ recurringTemplates: (data ?? []) as RecurringTemplate[] });
+  },
+
+  addRecurringTemplate: async (input) => {
+    const { userId } = get();
+    if (!userId) return;
+    const { data, error } = await supabase()
+      .from('recurring_templates')
+      .insert({ ...input, user_id: userId })
+      .select()
+      .single();
+    if (error) throw error;
+    set((s) => ({
+      recurringTemplates: [data as RecurringTemplate, ...s.recurringTemplates],
+    }));
+  },
+
+  updateRecurringTemplate: async (id, updates) => {
+    const prev = get().recurringTemplates;
+    set((s) => ({
+      recurringTemplates: s.recurringTemplates.map((t) =>
+        t.id === id ? { ...t, ...updates } : t,
+      ),
+    }));
+    const { error } = await supabase()
+      .from('recurring_templates')
+      .update(updates)
+      .eq('id', id);
+    if (error) {
+      set({ recurringTemplates: prev });
+      throw error;
+    }
+  },
+
+  deleteRecurringTemplate: async (id) => {
+    const prev = get().recurringTemplates;
+    set((s) => ({
+      recurringTemplates: s.recurringTemplates.filter((t) => t.id !== id),
+    }));
+    const { error } = await supabase()
+      .from('recurring_templates')
+      .delete()
+      .eq('id', id);
+    if (error) {
+      set({ recurringTemplates: prev });
+      throw error;
+    }
+  },
+
+  toggleRecurringTemplate: async (id, isEnabled) => {
+    await get().updateRecurringTemplate(id, { is_enabled: isEnabled });
+  },
 
   fetchPlannedBlocks: async (fromISO, toISO) => {
     const { userId } = get();
@@ -712,6 +907,8 @@ export const useStore = create<Store>((set, get) => ({
         planned_for_date,
         subtasks ( id, task_id, title, is_done, total_time_seconds, sort_order ),
         task_tags ( tag_id ),
+        task_categories ( category_id ),
+        task_projects ( project_id ),
         time_sessions ( id, task_id, subtask_id, started_at, duration_seconds, label )
       `,
       )
@@ -760,11 +957,25 @@ export const useStore = create<Store>((set, get) => ({
       .single();
     if (error) throw error;
     const task = data as TaskRow;
+    const categoryIds = input.category_ids ?? [];
+    const projectIds = input.project_ids ?? [];
     if (input.tag_ids.length > 0) {
       const { error: tagErr } = await supabase()
         .from('task_tags')
         .insert(input.tag_ids.map((tag_id) => ({ task_id: task.id, tag_id })));
       if (tagErr) throw tagErr;
+    }
+    if (categoryIds.length > 0) {
+      const { error: catErr } = await supabase()
+        .from('task_categories')
+        .insert(categoryIds.map((category_id) => ({ task_id: task.id, category_id })));
+      if (catErr) throw catErr;
+    }
+    if (projectIds.length > 0) {
+      const { error: projErr } = await supabase()
+        .from('task_projects')
+        .insert(projectIds.map((project_id) => ({ task_id: task.id, project_id })));
+      if (projErr) throw projErr;
     }
     const newTask: TaskType = {
       ...rowToTask({
@@ -774,9 +985,13 @@ export const useStore = create<Store>((set, get) => ({
         planned_for_date: task.planned_for_date ?? null,
         subtasks: [],
         task_tags: [],
+        task_categories: [],
+        task_projects: [],
         time_sessions: [],
       }),
       tag_ids: input.tag_ids,
+      category_ids: categoryIds,
+      project_ids: projectIds,
     };
     set((s) => ({ tasks: [...s.tasks, newTask] }));
     return task.id;
@@ -1034,4 +1249,305 @@ export const useStore = create<Store>((set, get) => ({
       }
     }
   },
+
+  // ---- Categories (AGENT1) ------------------------------------------------
+  fetchCategories: async () => {
+    const { userId } = get();
+    if (!userId) return;
+    const { data, error } = await supabase()
+      .from('categories')
+      .select('id, name, color')
+      .eq('user_id', userId)
+      .order('sort_order', { ascending: true });
+    if (error) throw error;
+    set({ categories: (data ?? []) as CategoryType[] });
+  },
+
+  addCategory: async (name, color) => {
+    const res = await fetch('/api/categories', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, color }),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(body.error ?? `HTTP ${res.status}`);
+    }
+    const { category } = (await res.json()) as { category: CategoryType };
+    set((s) => ({ categories: [...s.categories, category] }));
+    return category;
+  },
+
+  updateCategory: async (id, updates) => {
+    const prev = get().categories;
+    set((s) => ({
+      categories: s.categories.map((c) => (c.id === id ? { ...c, ...updates } : c)),
+    }));
+    const res = await fetch(`/api/categories/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    if (!res.ok) {
+      set({ categories: prev });
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(body.error ?? `HTTP ${res.status}`);
+    }
+  },
+
+  deleteCategory: async (id) => {
+    const prevCats = get().categories;
+    const prevTasks = get().tasks;
+    set((s) => ({
+      categories: s.categories.filter((c) => c.id !== id),
+      tasks: s.tasks.map((t) => ({
+        ...t,
+        category_ids: t.category_ids.filter((x) => x !== id),
+      })),
+    }));
+    const res = await fetch(`/api/categories/${id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      set({ categories: prevCats, tasks: prevTasks });
+      throw new Error(`HTTP ${res.status}`);
+    }
+  },
+
+  attachCategoryToTask: async (taskId, categoryId) => {
+    const prev = get().tasks;
+    set((s) => ({
+      tasks: s.tasks.map((t) =>
+        t.id === taskId && !t.category_ids.includes(categoryId)
+          ? { ...t, category_ids: [...t.category_ids, categoryId] }
+          : t,
+      ),
+    }));
+    const res = await fetch(`/api/tasks/${taskId}/categories`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ category_id: categoryId }),
+    });
+    if (!res.ok) {
+      set({ tasks: prev });
+      throw new Error(`HTTP ${res.status}`);
+    }
+  },
+
+  detachCategoryFromTask: async (taskId, categoryId) => {
+    const prev = get().tasks;
+    set((s) => ({
+      tasks: s.tasks.map((t) =>
+        t.id === taskId
+          ? { ...t, category_ids: t.category_ids.filter((x) => x !== categoryId) }
+          : t,
+      ),
+    }));
+    const res = await fetch(
+      `/api/tasks/${taskId}/categories/${categoryId}`,
+      { method: 'DELETE' },
+    );
+    if (!res.ok) {
+      set({ tasks: prev });
+      throw new Error(`HTTP ${res.status}`);
+    }
+  },
+
+  // Bulk sync — diffs the target list against current state and fires
+  // attach/detach calls in parallel. Used by the edit drawer "Save".
+  updateTaskCategories: async (taskId, categoryIds) => {
+    const task = get().tasks.find((t) => t.id === taskId);
+    if (!task) return;
+    const current = new Set(task.category_ids);
+    const next = new Set(categoryIds);
+    const toAdd = categoryIds.filter((id) => !current.has(id));
+    const toRemove = task.category_ids.filter((id) => !next.has(id));
+    await Promise.all([
+      ...toAdd.map((id) => get().attachCategoryToTask(taskId, id)),
+      ...toRemove.map((id) => get().detachCategoryFromTask(taskId, id)),
+    ]);
+  },
+
+  // ---- Projects (AGENT1) --------------------------------------------------
+  fetchProjects: async () => {
+    const { userId } = get();
+    if (!userId) return;
+    const { data, error } = await supabase()
+      .from('projects')
+      .select('id, name, color, status')
+      .eq('user_id', userId)
+      .order('sort_order', { ascending: true });
+    if (error) throw error;
+    set({ projects: (data ?? []) as ProjectType[] });
+  },
+
+  addProject: async (name, color, status) => {
+    const res = await fetch('/api/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, color, status }),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(body.error ?? `HTTP ${res.status}`);
+    }
+    const { project } = (await res.json()) as { project: ProjectType };
+    set((s) => ({ projects: [...s.projects, project] }));
+    return project;
+  },
+
+  updateProject: async (id, updates) => {
+    const prev = get().projects;
+    set((s) => ({
+      projects: s.projects.map((p) => (p.id === id ? { ...p, ...updates } : p)),
+    }));
+    const res = await fetch(`/api/projects/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    if (!res.ok) {
+      set({ projects: prev });
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(body.error ?? `HTTP ${res.status}`);
+    }
+  },
+
+  setProjectStatus: async (id, status) => {
+    await get().updateProject(id, { status });
+  },
+
+  deleteProject: async (id) => {
+    const prevProjects = get().projects;
+    const prevTasks = get().tasks;
+    set((s) => ({
+      projects: s.projects.filter((p) => p.id !== id),
+      tasks: s.tasks.map((t) => ({
+        ...t,
+        project_ids: t.project_ids.filter((x) => x !== id),
+      })),
+    }));
+    const res = await fetch(`/api/projects/${id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      set({ projects: prevProjects, tasks: prevTasks });
+      throw new Error(`HTTP ${res.status}`);
+    }
+  },
+
+  attachProjectToTask: async (taskId, projectId) => {
+    const prev = get().tasks;
+    set((s) => ({
+      tasks: s.tasks.map((t) =>
+        t.id === taskId && !t.project_ids.includes(projectId)
+          ? { ...t, project_ids: [...t.project_ids, projectId] }
+          : t,
+      ),
+    }));
+    const res = await fetch(`/api/tasks/${taskId}/projects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id: projectId }),
+    });
+    if (!res.ok) {
+      set({ tasks: prev });
+      throw new Error(`HTTP ${res.status}`);
+    }
+  },
+
+  detachProjectFromTask: async (taskId, projectId) => {
+    const prev = get().tasks;
+    set((s) => ({
+      tasks: s.tasks.map((t) =>
+        t.id === taskId
+          ? { ...t, project_ids: t.project_ids.filter((x) => x !== projectId) }
+          : t,
+      ),
+    }));
+    const res = await fetch(
+      `/api/tasks/${taskId}/projects/${projectId}`,
+      { method: 'DELETE' },
+    );
+    if (!res.ok) {
+      set({ tasks: prev });
+      throw new Error(`HTTP ${res.status}`);
+    }
+  },
+
+  updateTaskProjects: async (taskId, projectIds) => {
+    const task = get().tasks.find((t) => t.id === taskId);
+    if (!task) return;
+    const current = new Set(task.project_ids);
+    const next = new Set(projectIds);
+    const toAdd = projectIds.filter((id) => !current.has(id));
+    const toRemove = task.project_ids.filter((id) => !next.has(id));
+    await Promise.all([
+      ...toAdd.map((id) => get().attachProjectToTask(taskId, id)),
+      ...toRemove.map((id) => get().detachProjectFromTask(taskId, id)),
+    ]);
+  },
+
+  // ---- Insights -----------------------------------------------------------
+  insightsRange: 'month',
+  insightsPayload: null,
+  insightsLoading: false,
+  insightsError: null,
+  insightsFetchedAt: 0,
+  insightsFetchedForRange: null,
+  insightsSelectedProjectId: null,
+  insightsSelectedTagId: null,
+
+  setInsightsRange: (range) => {
+    set({
+      insightsRange: range,
+      // Drill-down picks are range-scoped; clear on range change.
+      insightsSelectedProjectId: null,
+      insightsSelectedTagId: null,
+    });
+    void get().fetchInsights();
+  },
+
+  fetchInsights: async (force = false) => {
+    const {
+      insightsRange,
+      insightsFetchedAt,
+      insightsFetchedForRange,
+      insightsPayload,
+    } = get();
+    // 60s cache if the range matches and we already have data.
+    const isFresh =
+      !force &&
+      insightsPayload !== null &&
+      insightsFetchedForRange === insightsRange &&
+      Date.now() - insightsFetchedAt < 60_000;
+    if (isFresh) return;
+    set({ insightsLoading: true, insightsError: null });
+    try {
+      const { data: { session } } = await supabase().auth.getSession();
+      const token = session?.access_token;
+      const res = await fetch(`/api/insights?range=${insightsRange}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        cache: 'no-store',
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      const payload = (await res.json()) as InsightsPayload;
+      set({
+        insightsPayload: payload,
+        insightsLoading: false,
+        insightsFetchedAt: Date.now(),
+        insightsFetchedForRange: insightsRange,
+        // Default drill-down picks to the top item if not already set.
+        insightsSelectedProjectId:
+          get().insightsSelectedProjectId ?? payload.projects[0]?.id ?? null,
+        insightsSelectedTagId:
+          get().insightsSelectedTagId ?? payload.tags[0]?.id ?? null,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load insights';
+      set({ insightsLoading: false, insightsError: message });
+    }
+  },
+
+  setInsightsSelectedProject: (id) => set({ insightsSelectedProjectId: id }),
+  setInsightsSelectedTag: (id) => set({ insightsSelectedTagId: id }),
 }));

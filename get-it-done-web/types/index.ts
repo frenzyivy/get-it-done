@@ -35,6 +35,8 @@ export interface TaskType {
   // task. Distinct from `due_date` which is the external deadline.
   planned_for_date: string | null;
   tag_ids: string[];
+  category_ids: string[];
+  project_ids: string[];
   subtasks: SubtaskType[];
   sessions: TimeSession[];
 }
@@ -43,6 +45,21 @@ export interface TagType {
   id: string;
   name: string;
   color: string;
+}
+
+export interface CategoryType {
+  id: string;
+  name: string;
+  color: string;
+}
+
+export type ProjectStatus = 'active' | 'paused' | 'archived';
+
+export interface ProjectType {
+  id: string;
+  name: string;
+  color: string;
+  status: ProjectStatus;
 }
 
 export type ViewMode = 'list' | 'kanban' | 'schedule' | 'timeline';
@@ -130,6 +147,57 @@ export interface TrackedSession {
   mode: TrackedMode;
   was_paused: boolean;
   drift_events: DriftEvent[];
+  // Focus Lock (migration 0018). Broken = user exited a Strict session early;
+  // planned_duration_seconds = duration chip picked on the lock picker.
+  broken: boolean;
+  broken_reason: string | null;
+  planned_duration_seconds: number | null;
+}
+
+// Focus Lock — UI labels map 1:1 to focus modes. Parity with mobile.
+export type FocusLockLevel = 'just_track' | 'focus' | 'no_mercy';
+
+export const FOCUS_LOCK_TO_MODE: Record<FocusLockLevel, FocusMode> = {
+  just_track: 'open',
+  focus: 'app_focus',
+  no_mercy: 'strict',
+};
+
+export const MODE_TO_FOCUS_LOCK: Partial<Record<FocusMode, FocusLockLevel>> = {
+  open: 'just_track',
+  app_focus: 'focus',
+  strict: 'no_mercy',
+};
+
+// Recurring templates — blueprints materialized into tasks by the
+// `create-recurring-tasks` Edge Function on a schedule.
+export type RecurringFrequency = 'daily' | 'weekdays' | 'weekly' | 'monthly';
+
+export interface RecurringTemplate {
+  id: string;
+  user_id: string;
+  title: string;
+  priority: Priority;
+  tag_ids: string[];
+  subtask_titles: string[];
+  frequency: RecurringFrequency;
+  day_of_week: number | null;
+  day_of_month: number | null;
+  hour_local: number;
+  is_enabled: boolean;
+  last_materialized_at: string | null;
+}
+
+export interface NewRecurringTemplateInput {
+  title: string;
+  priority: Priority;
+  tag_ids: string[];
+  subtask_titles: string[];
+  frequency: RecurringFrequency;
+  day_of_week: number | null;
+  day_of_month: number | null;
+  hour_local: number;
+  is_enabled: boolean;
 }
 
 export interface PlannedBlock {
@@ -147,7 +215,77 @@ export interface NewTaskInput {
   title: string;
   priority: Priority;
   tag_ids: string[];
+  category_ids?: string[];
+  project_ids?: string[];
   due_date: string | null;
   status: Status;
   estimated_seconds?: number | null;
+}
+
+// Insights page — range passed to /api/insights?range=...
+export type InsightsRange = 'week' | 'month' | 'all';
+
+export interface InsightsBucket {
+  id: string;
+  name: string;
+  color: string;
+  total_seconds: number;
+}
+
+export interface InsightsProjectBucket extends InsightsBucket {
+  status: 'active' | 'paused' | 'archived';
+  task_count: number;
+}
+
+export interface InsightsTagBucket {
+  id: string;
+  name: string;
+  total_seconds: number;
+}
+
+export interface InsightsMatrixRow {
+  project_id: string;
+  project_name: string;
+  project_color: string;
+  cells: Record<string, number>; // category_id -> seconds
+  total_seconds: number;
+}
+
+export interface InsightsTask {
+  id: string;
+  title: string;
+  total_seconds: number;
+  categories: { id: string; name: string; color: string }[];
+}
+
+export interface InsightsSummary {
+  total_seconds: number;
+  total_seconds_prev: number;
+  task_count: number;
+  top_category: InsightsBucket | null;
+  top_category_pct: number;
+  top_project: InsightsProjectBucket | null;
+  deepest_day: { date: string; total_seconds: number } | null;
+}
+
+export interface InsightsPayload {
+  range: InsightsRange;
+  range_start: string | null; // ISO, null for all-time
+  range_end: string;          // ISO
+  summary: InsightsSummary;
+  categories: InsightsBucket[];
+  projects: InsightsProjectBucket[];
+  matrix: {
+    category_order: { id: string; name: string; color: string }[];
+    rows: InsightsMatrixRow[];
+  };
+  // Tasks grouped by project id — client slices per active project
+  tasks_by_project: Record<string, InsightsTask[]>;
+  // Drill-down by project: project_id -> category buckets (uses this project's tasks only)
+  categories_by_project: Record<string, InsightsBucket[]>;
+  tags: InsightsTagBucket[];
+  // Double-filter: tag_id -> category buckets
+  categories_by_tag: Record<string, InsightsBucket[]>;
+  // true if Agent 1's schema isn't deployed yet
+  missing_label_schema?: boolean;
 }

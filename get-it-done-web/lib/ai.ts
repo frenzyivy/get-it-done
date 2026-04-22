@@ -30,12 +30,20 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return (await res.json()) as T;
 }
 
+export interface AiLabelSuggestion {
+  category_ids: string[];
+  project_ids: string[];
+}
+
 export const aiClient = {
   generateSubtasks: (taskTitle: string) =>
     post<{ subtasks: AiSubtask[] }>('/api/ai/generate-subtasks', { task_title: taskTitle }),
 
   smartTag: (taskTitle: string) =>
     post<{ suggestions: AiTagSuggestion[] }>('/api/ai/smart-tag', { task_title: taskTitle }),
+
+  suggestLabels: (taskTitle: string) =>
+    post<AiLabelSuggestion>('/api/ai/suggest-labels', { task_title: taskTitle }),
 
   estimateTask: (taskTitle: string, subtasks?: string[]) =>
     post<{ estimated_seconds: number; reasoning: string }>(

@@ -109,6 +109,32 @@ export function TimelineView() {
   const notWorkedSeconds = Math.max(0, goalSeconds - workedSeconds);
   const pct = goalSeconds > 0 ? Math.min(100, (workedSeconds / goalSeconds) * 100) : 0;
 
+  // Worked seconds broken down per day of the current Sun→Sat week. Live
+  // sessions contribute (now − started_at), same rule as the weekly total.
+  const dailyBreakdown = useMemo(() => {
+    const liveIds = new Set(activeSessions.map((a) => a.id));
+    const buckets: { date: Date; seconds: number }[] = Array.from(
+      { length: 7 },
+      (_, i) => ({ date: new Date(weekStart.getTime() + i * DAY_MS), seconds: 0 }),
+    );
+    for (const s of weekSessions) {
+      const start = new Date(s.started_at).getTime();
+      const dayIdx = Math.floor((start - weekStart.getTime()) / DAY_MS);
+      if (dayIdx < 0 || dayIdx > 6) continue;
+      let dur = 0;
+      if (s.ended_at || !liveIds.has(s.id)) {
+        dur = s.duration_seconds ?? 0;
+      } else {
+        dur = Math.max(0, Math.floor((nowMs - start) / 1000));
+      }
+      buckets[dayIdx].seconds += dur;
+    }
+    return buckets;
+  }, [weekSessions, activeSessions, weekStart, nowMs]);
+
+  const dailyMaxSeconds = Math.max(1, ...dailyBreakdown.map((d) => d.seconds));
+  const todayMs = dayStart.getTime();
+
   const exportCsv = () => {
     const header = 'session_id,started_at,ended_at,duration_seconds';
     const body = weekSessions
@@ -209,6 +235,54 @@ export function TimelineView() {
             await updatePrefs({ weekly_work_goal_hours: hours });
           }}
         />
+      </div>
+
+      <div className="bg-white rounded-[14px] p-4 shadow-[0_1px_4px_rgba(0,0,0,0.06),0_0_0_1px_rgba(0,0,0,0.04)]">
+        <div className="text-[11px] font-bold uppercase tracking-[0.5px] text-[#888] mb-3">
+          Daily breakdown
+        </div>
+        <div className="flex flex-col gap-2">
+          {dailyBreakdown.map((d) => {
+            const isToday = d.date.getTime() === todayMs;
+            const isFuture = d.date.getTime() > todayMs;
+            const barPct = (d.seconds / dailyMaxSeconds) * 100;
+            const dayLabel = d.date.toLocaleDateString('en-IN', {
+              weekday: 'short',
+              day: 'numeric',
+              month: 'short',
+            });
+            return (
+              <div key={d.date.toISOString()} className="flex items-center gap-3">
+                <div
+                  className="w-[90px] shrink-0 text-[12px] font-bold"
+                  style={{ color: isToday ? '#8b5cf6' : isFuture ? '#c8c8d0' : '#1a1a2e' }}
+                >
+                  {dayLabel}
+                  {isToday && (
+                    <span className="ml-1 text-[10px] font-extrabold uppercase text-[#8b5cf6]">
+                      · today
+                    </span>
+                  )}
+                </div>
+                <div className="flex-1 h-2 bg-[#f3f4f6] rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all"
+                    style={{
+                      width: `${barPct}%`,
+                      backgroundColor: isToday ? '#8b5cf6' : '#10b981',
+                    }}
+                  />
+                </div>
+                <div
+                  className="w-[70px] shrink-0 text-right text-[12px] font-bold"
+                  style={{ color: d.seconds > 0 ? '#10b981' : '#c8c8d0' }}
+                >
+                  {d.seconds > 0 ? fmtShort(d.seconds) : '—'}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       <div className="flex items-center justify-end">

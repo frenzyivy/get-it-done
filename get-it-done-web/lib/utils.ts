@@ -66,3 +66,81 @@ export function tomorrowISO(): string {
   d.setDate(d.getDate() + 1);
   return toLocalDateISO(d);
 }
+
+// Category / project pill tinting. Takes a hex foreground color and returns a
+// pale background of the same hue (HSL lightness boosted to ~93%). Produces the
+// light-tint look from the spec without hardcoding one map per seeded color.
+function parseHex(hex: string): [number, number, number] | null {
+  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return null;
+  let s = m[1];
+  if (s.length === 3) s = s.split('').map((c) => c + c).join('');
+  return [
+    parseInt(s.slice(0, 2), 16),
+    parseInt(s.slice(2, 4), 16),
+    parseInt(s.slice(4, 6), 16),
+  ];
+}
+
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  const rn = r / 255;
+  const gn = g / 255;
+  const bn = b / 255;
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  const l = (max + min) / 2;
+  if (max === min) return [0, 0, l];
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h: number;
+  switch (max) {
+    case rn:
+      h = ((gn - bn) / d + (gn < bn ? 6 : 0));
+      break;
+    case gn:
+      h = ((bn - rn) / d + 2);
+      break;
+    default:
+      h = ((rn - gn) / d + 4);
+  }
+  return [h / 6, s, l];
+}
+
+function hslToHex(h: number, s: number, l: number): string {
+  const hue2rgb = (p: number, q: number, t: number): number => {
+    if (t < 0) t += 1;
+    if (t > 1) t -= 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  };
+  let r: number;
+  let g: number;
+  let b: number;
+  if (s === 0) {
+    r = g = b = l;
+  } else {
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    r = hue2rgb(p, q, h + 1 / 3);
+    g = hue2rgb(p, q, h);
+    b = hue2rgb(p, q, h - 1 / 3);
+  }
+  const toHex = (v: number) =>
+    Math.round(v * 255)
+      .toString(16)
+      .padStart(2, '0');
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+// Background tint for a colored pill (category/project). Keeps the hue, clips
+// saturation to avoid oversaturated pastels, and lifts lightness to ~93% so
+// text in the original color stays legible on top.
+export function labelTintBg(hex: string): string {
+  const rgb = parseHex(hex);
+  if (!rgb) return 'rgba(0,0,0,0.04)';
+  const [h, s, _l] = rgbToHsl(rgb[0], rgb[1], rgb[2]);
+  void _l;
+  return hslToHex(h, Math.min(s, 0.6), 0.93);
+}

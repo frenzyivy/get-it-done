@@ -1,11 +1,22 @@
+import { useEffect } from 'react';
 import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useTheme } from 'react-native-paper';
 import { useStore } from '@/lib/store';
+import { useUI } from '@/lib/ui-context';
 import { supabase } from '@/lib/supabase';
 import { M3Switch } from '@/components/M3Switch';
 import { useAppTheme } from '@/lib/theme-context';
 import { themes, type as M3Type, type ThemeName } from '@/lib/theme';
-import type { UserPrefs } from '@/types';
+import type { FocusMode, UserPrefs } from '@/types';
+
+const FOCUS_MODE_LABELS: Record<FocusMode, string> = {
+  open: 'Just track',
+  call_focus: 'Call focus',
+  app_focus: 'Focus',
+  strict: 'No mercy',
+};
+
+const FOCUS_MODE_CYCLE: FocusMode[] = ['open', 'app_focus', 'strict'];
 
 const RULE_LABELS: Record<string, { label: string; desc: string }> = {
   due_soon: {
@@ -194,8 +205,34 @@ export default function SettingsScreen() {
   const c = theme.colors;
   const prefs = useStore((s) => s.prefs);
   const rules = useStore((s) => s.rules);
+  const tasks = useStore((s) => s.tasks);
   const updatePrefs = useStore((s) => s.updatePrefs);
   const toggleRule = useStore((s) => s.toggleRule);
+  const { openFocusLockPicker, openRecurringTemplates } = useUI();
+  const recurringTemplates = useStore((s) => s.recurringTemplates);
+  const fetchRecurringTemplates = useStore((s) => s.fetchRecurringTemplates);
+
+  useEffect(() => {
+    void fetchRecurringTemplates();
+  }, [fetchRecurringTemplates]);
+
+  const handleStartFocusFromSettings = () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const pick =
+      tasks.find(
+        (t) => t.planned_for_date === today && t.status !== 'done',
+      ) ??
+      tasks.find((t) => t.status === 'in_progress') ??
+      tasks.find((t) => t.status === 'todo');
+    if (pick) openFocusLockPicker(pick.id);
+  };
+
+  const handleCycleDefaultMode = () => {
+    if (!prefs) return;
+    const idx = FOCUS_MODE_CYCLE.indexOf(prefs.default_timer_mode);
+    const next = FOCUS_MODE_CYCLE[(idx + 1) % FOCUS_MODE_CYCLE.length];
+    updatePrefs({ default_timer_mode: next });
+  };
 
   if (!prefs) {
     return (
@@ -265,6 +302,75 @@ export default function SettingsScreen() {
         />
       </SectionCard>
 
+      <SectionCard title="Focus sessions">
+        <Row
+          first
+          title="Start focus session"
+          desc={
+            tasks.length === 0
+              ? 'Add a task first to start a focus session.'
+              : 'Pick a task, a lock level, and a duration.'
+          }
+          trailing={
+            <Pressable
+              onPress={handleStartFocusFromSettings}
+              disabled={tasks.length === 0}
+              accessibilityRole="button"
+              style={({ pressed }) => ({
+                height: 36,
+                paddingHorizontal: 14,
+                borderRadius: 18,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: pressed ? c.primaryContainer : c.primary,
+                opacity: tasks.length === 0 ? 0.5 : 1,
+              })}
+            >
+              <Text style={{ ...M3Type.labelLarge, color: c.onPrimary }}>
+                Start
+              </Text>
+            </Pressable>
+          }
+        />
+        <Row
+          title="Default lock level"
+          desc="What new timers start as. Tap to cycle."
+          trailing={
+            <Pressable
+              onPress={handleCycleDefaultMode}
+              accessibilityRole="button"
+              style={({ pressed }) => ({
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+                borderRadius: 8,
+                backgroundColor: pressed ? c.surfaceVariant : 'transparent',
+              })}
+            >
+              <Text
+                style={{
+                  ...M3Type.bodyMedium,
+                  color: c.primary,
+                  fontWeight: '700',
+                }}
+              >
+                {FOCUS_MODE_LABELS[prefs.default_timer_mode] ?? prefs.default_timer_mode}
+              </Text>
+            </Pressable>
+          }
+        />
+        <Row
+          title="Announce focus start"
+          desc="Play a short voice cue when a focus session begins (web)."
+          trailing={
+            <M3Switch
+              value={prefs.announce_focus_sessions}
+              onValueChange={(v) => setPref('announce_focus_sessions', v)}
+              accessibilityLabel="Announce focus start"
+            />
+          }
+        />
+      </SectionCard>
+
       <SectionCard title="Briefings">
         <Row
           first
@@ -327,6 +433,36 @@ export default function SettingsScreen() {
               );
             })
         )}
+      </SectionCard>
+
+      <SectionCard title="Recurring templates">
+        <Row
+          first
+          title="Manage templates"
+          desc={
+            recurringTemplates.length === 0
+              ? 'Create blueprints that turn into tasks on a schedule.'
+              : `${recurringTemplates.length} template${recurringTemplates.length === 1 ? '' : 's'}. ${recurringTemplates.filter((t) => t.is_enabled).length} active.`
+          }
+          trailing={
+            <Pressable
+              onPress={openRecurringTemplates}
+              accessibilityRole="button"
+              style={({ pressed }) => ({
+                height: 36,
+                paddingHorizontal: 14,
+                borderRadius: 18,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: pressed ? c.primaryContainer : c.primary,
+              })}
+            >
+              <Text style={{ ...M3Type.labelLarge, color: c.onPrimary }}>
+                Open
+              </Text>
+            </Pressable>
+          }
+        />
       </SectionCard>
 
       <SectionCard title="AI suggestions">

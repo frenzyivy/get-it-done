@@ -6,6 +6,8 @@ import { useStore } from '@/lib/store';
 import { useLiveTimers } from '@/lib/useLiveTimer';
 import { PriorityBadge } from './PriorityBadge';
 import { TagBadge } from './TagBadge';
+import { CategoryPill } from './CategoryPill';
+import { ProjectBadge } from './ProjectBadge';
 import { ProgressBar } from './ProgressBar';
 import { SubtaskItem } from './SubtaskItem';
 import { AddSubtask } from './AddSubtask';
@@ -23,6 +25,8 @@ export function TaskCard({ task, compact = false }: Props) {
   const [timerOpen, setTimerOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const tags = useStore((s) => s.tags);
+  const categories = useStore((s) => s.categories);
+  const projects = useStore((s) => s.projects);
   const deleteTask = useStore((s) => s.deleteTask);
   const updateTask = useStore((s) => s.updateTask);
   const addSubtask = useStore((s) => s.addSubtask);
@@ -118,6 +122,12 @@ export function TaskCard({ task, compact = false }: Props) {
   const progress = getProgress(task.subtasks);
   const overdue = isOverdue(task.due_date, task.status);
   const taskTags = task.tag_ids.map((id) => tags.find((t) => t.id === id));
+  const taskCategories = task.category_ids
+    .map((id) => categories.find((c) => c.id === id))
+    .filter((c): c is NonNullable<typeof c> => !!c);
+  const taskProjects = task.project_ids
+    .map((id) => projects.find((p) => p.id === id))
+    .filter((p): p is NonNullable<typeof p> => !!p);
 
   const { timerIcon, panel, running } = PomodoroTimer({
     task,
@@ -232,6 +242,12 @@ export function TaskCard({ task, compact = false }: Props) {
             </div>
             <div className="flex gap-[6px] flex-wrap mt-[6px] items-center">
               <PriorityBadge priority={task.priority} />
+              {taskCategories.map((c) => (
+                <CategoryPill key={c.id} category={c} />
+              ))}
+              {taskProjects.map((p) => (
+                <ProjectBadge key={p.id} project={p} />
+              ))}
               {taskTags.map((t, i) => (
                 <TagBadge key={t?.id ?? i} tag={t} />
               ))}

@@ -1,9 +1,11 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useStore } from '@/lib/store';
 import { TagManager } from './TagManager';
+import { CategoryManagerModal } from './CategoryManagerModal';
+import { ProjectManagerModal } from './ProjectManagerModal';
 import { BoardView } from './BoardView';
 import { ListView } from './ListView';
 import { ScheduleView } from './ScheduleView';
@@ -16,17 +18,22 @@ import { SkeletonBoard } from './Skeleton';
 import { FocusModeView } from './FocusModeView';
 import { RolloverPromptModal } from './RolloverPromptModal';
 import { FloatingAddButton } from './FloatingAddButton';
+import { FocusLockPicker } from './FocusLockPicker';
 
 // v2 spec §3 — new IA: compact header, then goal bar, now-tracking bar,
 // then the segmented board/list switcher. Sign out moved to Settings.
 export function Dashboard({ userId }: { userId: string }) {
   const tasks = useStore((s) => s.tasks);
+  const categories = useStore((s) => s.categories);
+  const projects = useStore((s) => s.projects);
   const view = useStore((s) => s.view);
   const loading = useStore((s) => s.loading);
   const setUserId = useStore((s) => s.setUserId);
   const fetchAll = useStore((s) => s.fetchAll);
   const unsubscribeNotifications = useStore((s) => s.unsubscribeNotifications);
   const setView = useStore((s) => s.setView);
+  const [showCategoriesModal, setShowCategoriesModal] = useState(false);
+  const [showProjectsModal, setShowProjectsModal] = useState(false);
 
   useEffect(() => {
     setUserId(userId);
@@ -49,7 +56,28 @@ export function Dashboard({ userId }: { userId: string }) {
           </h1>
           <div className="flex gap-2 items-center">
             <NotificationBell />
+            <button
+              onClick={() => setShowCategoriesModal(true)}
+              className="px-3 py-[6px] rounded-lg border-[1.5px] border-[#d5cafe] bg-[#faf7ff] text-xs font-bold text-[#5a3fd8] hover:border-[#8b5cf6] transition-colors"
+              title="Manage categories"
+            >
+              🎯 Categories ({categories.length})
+            </button>
+            <button
+              onClick={() => setShowProjectsModal(true)}
+              className="px-3 py-[6px] rounded-lg border-[1.5px] border-[#d5cafe] bg-[#faf7ff] text-xs font-bold text-[#5a3fd8] hover:border-[#8b5cf6] transition-colors"
+              title="Manage projects"
+            >
+              ★ Projects ({projects.length})
+            </button>
             <TagManager />
+            <Link
+              href="/insights"
+              className="px-3 py-[6px] rounded-lg border-[1.5px] border-[#e5e7eb] bg-white text-xs font-bold text-[#666] hover:border-[#8b5cf6] transition-colors"
+              title="Insights"
+            >
+              📊 Insights
+            </Link>
             <Link
               href="/settings"
               className="px-3 py-[6px] rounded-lg border-[1.5px] border-[#e5e7eb] bg-white text-xs font-bold text-[#666] hover:border-[#8b5cf6] transition-colors"
@@ -116,6 +144,13 @@ export function Dashboard({ userId }: { userId: string }) {
       <FocusModeView />
       <RolloverPromptModal />
       <FloatingAddButton />
+      <FocusLockPicker />
+      {showCategoriesModal && (
+        <CategoryManagerModal onClose={() => setShowCategoriesModal(false)} />
+      )}
+      {showProjectsModal && (
+        <ProjectManagerModal onClose={() => setShowProjectsModal(false)} />
+      )}
     </div>
   );
 }

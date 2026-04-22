@@ -34,6 +34,8 @@ export interface TaskType {
   // "Today's 5" planning date.
   planned_for_date: string | null;
   tag_ids: string[];
+  category_ids: string[];
+  project_ids: string[];
   subtasks: SubtaskType[];
   sessions: TimeSession[];
 }
@@ -44,12 +46,29 @@ export interface TagType {
   color: string;
 }
 
+export interface CategoryType {
+  id: string;
+  name: string;
+  color: string;
+}
+
+export type ProjectStatus = 'active' | 'paused' | 'archived';
+
+export interface ProjectType {
+  id: string;
+  name: string;
+  color: string;
+  status: ProjectStatus;
+}
+
 export type ViewMode = 'list' | 'kanban' | 'schedule' | 'timeline';
 
 export interface NewTaskInput {
   title: string;
   priority: Priority;
   tag_ids: string[];
+  category_ids?: string[];
+  project_ids?: string[];
   due_date: string | null;
   status: Status;
   estimated_seconds?: number | null;
@@ -141,6 +160,58 @@ export interface TrackedSession {
   mode: TrackedMode;
   was_paused: boolean;
   drift_events: DriftEvent[];
+  broken: boolean;
+  broken_reason: string | null;
+  planned_duration_seconds: number | null;
+}
+
+// Focus Lock (mobile) — UI labels map 1:1 to focus modes.
+//   just_track → 'open'
+//   focus      → 'app_focus'
+//   no_mercy   → 'strict'
+export type FocusLockLevel = 'just_track' | 'focus' | 'no_mercy';
+
+export const FOCUS_LOCK_TO_MODE: Record<FocusLockLevel, FocusMode> = {
+  just_track: 'open',
+  focus: 'app_focus',
+  no_mercy: 'strict',
+};
+
+export const MODE_TO_FOCUS_LOCK: Partial<Record<FocusMode, FocusLockLevel>> = {
+  open: 'just_track',
+  app_focus: 'focus',
+  strict: 'no_mercy',
+};
+
+// Recurring templates — blueprints materialized into tasks by the
+// `create-recurring-tasks` Edge Function on schedule. Parity with web.
+export type RecurringFrequency = 'daily' | 'weekdays' | 'weekly' | 'monthly';
+
+export interface RecurringTemplate {
+  id: string;
+  user_id: string;
+  title: string;
+  priority: Priority;
+  tag_ids: string[];
+  subtask_titles: string[];
+  frequency: RecurringFrequency;
+  day_of_week: number | null;
+  day_of_month: number | null;
+  hour_local: number;
+  is_enabled: boolean;
+  last_materialized_at: string | null;
+}
+
+export interface NewRecurringTemplateInput {
+  title: string;
+  priority: Priority;
+  tag_ids: string[];
+  subtask_titles: string[];
+  frequency: RecurringFrequency;
+  day_of_week: number | null;
+  day_of_month: number | null;
+  hour_local: number;
+  is_enabled: boolean;
 }
 
 export interface PlannedBlock {

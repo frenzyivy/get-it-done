@@ -25,6 +25,8 @@ import { PRIORITIES } from '@/lib/constants';
 import { useStore } from '@/lib/store';
 import { todayISO, tomorrowISO } from '@/lib/utils';
 import { TagPicker } from './TagPicker';
+import { CategoryPicker } from './CategoryPicker';
+import { ProjectPicker } from './ProjectPicker';
 import type { Priority, SubtaskType } from '@/types';
 
 // Feature 3 (mobile) — full edit sheet. Mirrors the web EditTaskDrawer:
@@ -80,6 +82,8 @@ function EditTaskSheetInner({
   const tags = useStore((s) => s.tags);
   const updateTask = useStore((s) => s.updateTask);
   const updateTaskTags = useStore((s) => s.updateTaskTags);
+  const updateTaskCategories = useStore((s) => s.updateTaskCategories);
+  const updateTaskProjects = useStore((s) => s.updateTaskProjects);
   const addSubtask = useStore((s) => s.addSubtask);
   const renameSubtask = useStore((s) => s.renameSubtask);
   const deleteSubtask = useStore((s) => s.deleteSubtask);
@@ -100,6 +104,8 @@ function EditTaskSheetInner({
     task?.estimated_seconds ? Math.round(task.estimated_seconds / 60) : null,
   );
   const [tagIds, setTagIds] = useState<string[]>(task?.tag_ids ?? []);
+  const [categoryIds, setCategoryIds] = useState<string[]>(task?.category_ids ?? []);
+  const [projectIds, setProjectIds] = useState<string[]>(task?.project_ids ?? []);
   const [allowAlarms, setAllowAlarms] = useState<boolean>(task?.allow_alarms ?? false);
   const [plannedForDate, setPlannedForDate] = useState<string>(
     task?.planned_for_date ?? '',
@@ -127,6 +133,18 @@ function EditTaskSheetInner({
       tagIds.some((id) => !task.tag_ids.includes(id))
     ) {
       await updateTaskTags(task.id, tagIds);
+    }
+    if (
+      categoryIds.length !== task.category_ids.length ||
+      categoryIds.some((id) => !task.category_ids.includes(id))
+    ) {
+      await updateTaskCategories(task.id, categoryIds);
+    }
+    if (
+      projectIds.length !== task.project_ids.length ||
+      projectIds.some((id) => !task.project_ids.includes(id))
+    ) {
+      await updateTaskProjects(task.id, projectIds);
     }
     onClose();
   };
@@ -456,6 +474,8 @@ function EditTaskSheetInner({
               </View>
             </Field>
 
+            <CategoryPicker selectedIds={categoryIds} onChange={setCategoryIds} />
+            <ProjectPicker selectedIds={projectIds} onChange={setProjectIds} />
             <TagPicker tags={tags} selectedIds={tagIds} onChange={setTagIds} />
 
             {/* Feature 5 — per-task alarm passthrough during Strict Zone */}

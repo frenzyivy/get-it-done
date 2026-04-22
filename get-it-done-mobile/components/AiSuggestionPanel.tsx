@@ -1,31 +1,47 @@
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import { aiClient, type AiSubtask, type AiTagSuggestion } from '@/lib/ai';
+import { useStore } from '@/lib/store';
 
 interface Props {
   taskTitle: string;
   selectedTagIds: string[];
+  selectedCategoryIds?: string[];
+  selectedProjectIds?: string[];
   onAcceptSubtasks: (titles: string[]) => void;
   onAcceptTags: (tagIds: string[]) => void;
   onAcceptEstimate: (seconds: number) => void;
+  onAcceptCategories?: (categoryIds: string[]) => void;
+  onAcceptProjects?: (projectIds: string[]) => void;
 }
 
-type Loading = 'none' | 'subtasks' | 'tags' | 'estimate';
+type Loading = 'none' | 'subtasks' | 'tags' | 'labels' | 'estimate';
 
 export function AiSuggestionPanel({
   taskTitle,
   selectedTagIds,
+  selectedCategoryIds = [],
+  selectedProjectIds = [],
   onAcceptSubtasks,
   onAcceptTags,
   onAcceptEstimate,
+  onAcceptCategories,
+  onAcceptProjects,
 }: Props) {
+  const categories = useStore((s) => s.categories);
+  const projects = useStore((s) => s.projects);
   const [loading, setLoading] = useState<Loading>('none');
   const [subtasks, setSubtasks] = useState<AiSubtask[] | null>(null);
   const [tagSuggestions, setTagSuggestions] = useState<AiTagSuggestion[] | null>(null);
+  const [labelSuggestion, setLabelSuggestion] = useState<{
+    categoryIds: string[];
+    projectIds: string[];
+  } | null>(null);
   const [estimate, setEstimate] = useState<{ seconds: number; reasoning: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const canRun = taskTitle.trim().length >= 3;
+  const canSuggestLabels = !!onAcceptCategories && !!onAcceptProjects;
 
   const run = async (which: Exclude<Loading, 'none'>) => {
     if (!canRun) return;
@@ -38,6 +54,12 @@ export function AiSuggestionPanel({
       } else if (which === 'tags') {
         const res = await aiClient.smartTag(taskTitle);
         setTagSuggestions(res.suggestions);
+      } else if (which === 'labels') {
+        const res = await aiClient.suggestLabels(taskTitle);
+        setLabelSuggestion({
+          categoryIds: res.category_ids,
+          projectIds: res.project_ids,
+        });
       } else {
         const res = await aiClient.estimateTask(taskTitle, subtasks?.map((s) => s.title));
         setEstimate({ seconds: res.estimated_seconds, reasoning: res.reasoning });
@@ -77,6 +99,15 @@ export function AiSuggestionPanel({
           disabled={!canRun || loading !== 'none'}
           onPress={() => run('subtasks')}
         />
+        {canSuggestLabels && (
+          <AiButton
+            label="Category & project"
+            loading={loading === 'labels'}
+            disabled={!canRun || loading !== 'none'}
+            onPress={() => run('labels')}
+            dashed
+          />
+        )}
         <AiButton
           label="Tags"
           loading={loading === 'tags'}
@@ -117,6 +148,111 @@ export function AiSuggestionPanel({
           </View>
         </View>
       )}
+
+      {labelSuggestion && canSuggestLabels && (() => {
+        const suggestedCats = labelSuggestion.categoryIds
+          .map((id) => categories.find((c) => c.id === id))
+          .filter((c): c is NonNullable<typeof c> => !!c)
+          .filter((c) => !selectedCategoryIds.includes(c.id));
+        const suggestedProjs = labelSuggestion.projectIds
+          .map((id) => projects.find((p) => p.id === id))
+          .filter((p): p is NonNullable<typeof p> => !!p)
+          .filter((p) => !selectedProjectIds.includes(p.id));
+        if (suggestedCats.length === 0 && suggestedProjs.length === 0) {
+          return (
+            <View style={{ marginTop: 12 }}>
+              <Text style={{ fontSize: 10, fontWeight: '700', color: '#6b7280', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                Suggested category & project
+              </Text>
+              <Text style={{ marginTop: 4, fontSize: 12, color: '#9ca3af' }}>
+                Nothing new — already covered.
+              </Text>
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                <SecondaryButton label="Dismiss" onPress={() => setLabelSuggestion(null)} />
+              </View>
+            </View>
+          );
+        }
+        return (
+          <View style={{ marginTop: 12 }}>
+            <Text style={{ fontSize: 10, fontWeight: '700', color: '#6b7280', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+              Suggested category & project
+            </Text>
+            {suggestedCats.length > 0 && (
+              <View style={{ marginTop: 4, flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                {suggestedCats.map((c) => (
+                  <Pressable
+                    key={c.id}
+                    onPress={() => onAcceptCategories!([c.id])}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 5,
+                      borderRadius: 6,
+                      borderWidth: 1,
+                      borderColor: '#c4b5fd',
+                      borderStyle: 'dashed',
+                      backgroundColor: '#fff',
+                      paddingHorizontal: 9,
+                      paddingVertical: 3,
+                    }}
+                  >
+                    <View
+                      style={{
+                        width: 6,
+                        height: 6,
+                        borderRadius: 3,
+                        backgroundColor: c.color,
+                      }}
+                    />
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: c.color }}>
+                      + {c.name}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
+            {suggestedProjs.length > 0 && (
+              <View style={{ marginTop: 8, flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                {suggestedProjs.map((p) => (
+                  <Pressable
+                    key={p.id}
+                    onPress={() => onAcceptProjects!([p.id])}
+                    style={{
+                      borderRadius: 6,
+                      borderWidth: 1,
+                      borderColor: '#c4b5fd',
+                      borderStyle: 'dashed',
+                      backgroundColor: '#fff',
+                      paddingHorizontal: 9,
+                      paddingVertical: 3,
+                    }}
+                  >
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: p.color }}>
+                      + {p.name}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+              <PrimaryButton
+                label="Add all"
+                onPress={() => {
+                  if (suggestedCats.length > 0) {
+                    onAcceptCategories!(suggestedCats.map((c) => c.id));
+                  }
+                  if (suggestedProjs.length > 0) {
+                    onAcceptProjects!(suggestedProjs.map((p) => p.id));
+                  }
+                  setLabelSuggestion(null);
+                }}
+              />
+              <SecondaryButton label="Dismiss" onPress={() => setLabelSuggestion(null)} />
+            </View>
+          </View>
+        );
+      })()}
 
       {tagSuggestions && (
         <View style={{ marginTop: 12 }}>
@@ -190,11 +326,13 @@ function AiButton({
   loading,
   disabled,
   onPress,
+  dashed = false,
 }: {
   label: string;
   loading: boolean;
   disabled: boolean;
   onPress: () => void;
+  dashed?: boolean;
 }) {
   return (
     <Pressable
@@ -206,6 +344,7 @@ function AiButton({
         gap: 6,
         borderRadius: 8,
         borderWidth: 1,
+        borderStyle: dashed ? 'dashed' : 'solid',
         borderColor: '#c4b5fd',
         backgroundColor: '#fff',
         paddingHorizontal: 10,

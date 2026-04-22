@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useStore } from '@/lib/store';
 import { SignOutButton } from './SignOutButton';
+import { RecurringTemplatesManager } from './RecurringTemplatesManager';
 import type { FocusMode } from '@/types';
 
 type UserPrefsDefaultMode = FocusMode;
@@ -75,10 +76,21 @@ export function Settings() {
   const prefs = useStore((s) => s.prefs);
   const rules = useStore((s) => s.rules);
   const userId = useStore((s) => s.userId);
+  const tasks = useStore((s) => s.tasks);
   const fetchPrefs = useStore((s) => s.fetchPrefs);
   const fetchRules = useStore((s) => s.fetchRules);
   const updatePrefs = useStore((s) => s.updatePrefs);
   const toggleRule = useStore((s) => s.toggleRule);
+  const openFocusLockPicker = useStore((s) => s.openFocusLockPicker);
+
+  const handleStartFocus = () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const pick =
+      tasks.find((t) => t.planned_for_date === today && t.status !== 'done') ??
+      tasks.find((t) => t.status === 'in_progress') ??
+      tasks.find((t) => t.status === 'todo');
+    if (pick) openFocusLockPicker(pick.id);
+  };
 
   useEffect(() => {
     if (!userId) return;
@@ -224,10 +236,29 @@ export function Settings() {
           />
         </section>
 
-        <section className="bg-white rounded-[14px] p-5 shadow-[0_1px_4px_rgba(0,0,0,0.06),0_0_0_1px_rgba(0,0,0,0.04)]">
+        <section className="bg-white rounded-[14px] p-5 mb-4 shadow-[0_1px_4px_rgba(0,0,0,0.06),0_0_0_1px_rgba(0,0,0,0.04)]">
           <h2 className="text-[13px] font-extrabold text-[#1a1a2e] uppercase tracking-[0.5px] mb-2">
             Focus sessions
           </h2>
+          <div className="flex items-center justify-between py-3 border-b border-[#eee]">
+            <div className="flex-1">
+              <div className="text-[14px] font-semibold text-[#1a1a2e]">
+                Start a focus session
+              </div>
+              <div className="text-[12px] text-[#888] mt-1">
+                {tasks.length === 0
+                  ? 'Add a task first to start a focus session.'
+                  : 'Pick a task, a lock level (Just track / Focus / No mercy), and a duration.'}
+              </div>
+            </div>
+            <button
+              onClick={handleStartFocus}
+              disabled={tasks.length === 0}
+              className="shrink-0 ml-3 px-4 py-2 rounded-lg bg-[#8b5cf6] text-white text-sm font-bold hover:bg-[#7c3aed] disabled:opacity-50"
+            >
+              Start
+            </button>
+          </div>
           <Toggle
             label="Announce focus sessions"
             desc="Play a spoken cue when entering Call Focus, App Focus, or Strict Zone."
@@ -273,6 +304,13 @@ export function Settings() {
               <option value="strict">Strict zone</option>
             </select>
           </div>
+        </section>
+
+        <section className="bg-white rounded-[14px] p-5 mb-4 shadow-[0_1px_4px_rgba(0,0,0,0.06),0_0_0_1px_rgba(0,0,0,0.04)]">
+          <h2 className="text-[13px] font-extrabold text-[#1a1a2e] uppercase tracking-[0.5px] mb-2">
+            Recurring templates
+          </h2>
+          <RecurringTemplatesManager />
         </section>
 
         <section className="bg-white rounded-[14px] p-5 shadow-[0_1px_4px_rgba(0,0,0,0.06),0_0_0_1px_rgba(0,0,0,0.04)]">

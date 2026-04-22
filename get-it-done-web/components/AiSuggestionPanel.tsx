@@ -2,33 +2,50 @@
 
 import { useState } from 'react';
 import { aiClient, type AiSubtask, type AiTagSuggestion } from '@/lib/ai';
+import { useStore } from '@/lib/store';
 
 interface Props {
   taskTitle: string;
   dueDate: string | null;
   selectedTagIds: string[];
+  selectedCategoryIds?: string[];
+  selectedProjectIds?: string[];
   onAcceptSubtasks: (titles: string[]) => void;
   onAcceptTags: (tagIds: string[]) => void;
   onAcceptEstimate: (seconds: number) => void;
+  // Label-suggestion support is opt-in — the edit drawer may not want it until
+  // the drawer is task-creation-aware. Both handlers must be provided together.
+  onAcceptCategories?: (categoryIds: string[]) => void;
+  onAcceptProjects?: (projectIds: string[]) => void;
 }
 
-type Loading = 'none' | 'subtasks' | 'tags' | 'estimate';
+type Loading = 'none' | 'subtasks' | 'tags' | 'labels' | 'estimate';
 
 export function AiSuggestionPanel({
   taskTitle,
   dueDate,
   selectedTagIds,
+  selectedCategoryIds = [],
+  selectedProjectIds = [],
   onAcceptSubtasks,
   onAcceptTags,
   onAcceptEstimate,
+  onAcceptCategories,
+  onAcceptProjects,
 }: Props) {
+  void dueDate;
   const [loading, setLoading] = useState<Loading>('none');
   const [subtasks, setSubtasks] = useState<AiSubtask[] | null>(null);
   const [tagSuggestions, setTagSuggestions] = useState<AiTagSuggestion[] | null>(null);
+  const [labelSuggestion, setLabelSuggestion] = useState<{
+    categoryIds: string[];
+    projectIds: string[];
+  } | null>(null);
   const [estimate, setEstimate] = useState<{ seconds: number; reasoning: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const canRun = taskTitle.trim().length >= 3;
+  const canSuggestLabels = !!onAcceptCategories && !!onAcceptProjects;
 
   const run = async (which: Exclude<Loading, 'none'>) => {
     if (!canRun) return;
@@ -41,6 +58,12 @@ export function AiSuggestionPanel({
       } else if (which === 'tags') {
         const res = await aiClient.smartTag(taskTitle);
         setTagSuggestions(res.suggestions);
+      } else if (which === 'labels') {
+        const res = await aiClient.suggestLabels(taskTitle);
+        setLabelSuggestion({
+          categoryIds: res.category_ids,
+          projectIds: res.project_ids,
+        });
       } else {
         const res = await aiClient.estimateTask(taskTitle, subtasks?.map((s) => s.title));
         setEstimate({ seconds: res.estimated_seconds, reasoning: res.reasoning });
@@ -70,6 +93,15 @@ export function AiSuggestionPanel({
           disabled={!canRun || loading !== 'none'}
           onClick={() => run('subtasks')}
         />
+        {canSuggestLabels && (
+          <AiButton
+            label="Suggest category & project"
+            loading={loading === 'labels'}
+            disabled={!canRun || loading !== 'none'}
+            onClick={() => run('labels')}
+            dashed
+          />
+        )}
         <AiButton
           label="Suggest tags"
           loading={loading === 'tags'}
@@ -114,6 +146,17 @@ export function AiSuggestionPanel({
             </button>
           </div>
         </div>
+      )}
+
+      {labelSuggestion && (
+        <LabelSuggestionBlock
+          suggestion={labelSuggestion}
+          selectedCategoryIds={selectedCategoryIds}
+          selectedProjectIds={selectedProjectIds}
+          onAcceptCategories={onAcceptCategories!}
+          onAcceptProjects={onAcceptProjects!}
+          onDismiss={() => setLabelSuggestion(null)}
+        />
       )}
 
       {tagSuggestions && (
@@ -186,19 +229,137 @@ function AiButton({
   loading,
   disabled,
   onClick,
+  dashed = false,
 }: {
   label: string;
   loading: boolean;
   disabled: boolean;
   onClick: () => void;
+  dashed?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
       disabled={disabled}
-      className="rounded-lg border border-[#c4b5fd] bg-white px-3 py-1 text-[12px] font-semibold text-[#7c3aed] disabled:opacity-50"
+      className="rounded-lg bg-white px-3 py-1 text-[12px] font-semibold text-[#7c3aed] disabled:opacity-50"
+      style={{
+        border: `1px ${dashed ? 'dashed' : 'solid'} #c4b5fd`,
+      }}
     >
       {loading ? '…thinking' : label}
     </button>
+  );
+}
+
+function LabelSuggestionBlock({
+  suggestion,
+  selectedCategoryIds,
+  selectedProjectIds,
+  onAcceptCategories,
+  onAcceptProjects,
+  onDismiss,
+}: {
+  suggestion: { categoryIds: string[]; projectIds: string[] };
+  selectedCategoryIds: string[];
+  selectedProjectIds: string[];
+  onAcceptCategories: (ids: string[]) => void;
+  onAcceptProjects: (ids: string[]) => void;
+  onDismiss: () => void;
+}) {
+  const categories = useStore((s) => s.categories);
+  const projects = useStore((s) => s.projects);
+
+  const suggestedCats = suggestion.categoryIds
+    .map((id) => categories.find((c) => c.id === id))
+    .filter((c): c is NonNullable<typeof c> => !!c)
+    .filter((c) => !selectedCategoryIds.includes(c.id));
+  const suggestedProjs = suggestion.projectIds
+    .map((id) => projects.find((p) => p.id === id))
+    .filter((p): p is NonNullable<typeof p> => !!p)
+    .filter((p) => !selectedProjectIds.includes(p.id));
+
+  if (suggestedCats.length === 0 && suggestedProjs.length === 0) {
+    return (
+      <div className="mt-3">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-[#6b7280]">
+          Suggested category &amp; project
+        </p>
+        <p className="mt-1 text-[12px] text-[#9ca3af]">
+          Nothing new to add — already covered.
+        </p>
+        <button
+          onClick={onDismiss}
+          className="mt-2 rounded-lg border border-[#e5e7eb] px-3 py-1 text-[12px] text-[#6b7280]"
+        >
+          Dismiss
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-[#6b7280]">
+        Suggested category &amp; project
+      </p>
+      {suggestedCats.length > 0 && (
+        <div className="mt-1 flex flex-wrap gap-2">
+          {suggestedCats.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => {
+                onAcceptCategories([c.id]);
+              }}
+              className="inline-flex items-center gap-[5px] rounded-md px-[9px] py-[3px] text-[11px] font-bold"
+              style={{ background: '#faf5ff', color: c.color, border: '1px dashed #c4b5fd' }}
+            >
+              <span
+                className="w-[6px] h-[6px] rounded-full"
+                style={{ background: c.color }}
+              />
+              + {c.name}
+            </button>
+          ))}
+        </div>
+      )}
+      {suggestedProjs.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {suggestedProjs.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => {
+                onAcceptProjects([p.id]);
+              }}
+              className="rounded-md px-[9px] py-[3px] text-[11px] font-semibold"
+              style={{ background: '#faf5ff', color: p.color, border: '1px dashed #c4b5fd' }}
+            >
+              + {p.name}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="mt-2 flex gap-2">
+        <button
+          onClick={() => {
+            if (suggestedCats.length > 0) {
+              onAcceptCategories(suggestedCats.map((c) => c.id));
+            }
+            if (suggestedProjs.length > 0) {
+              onAcceptProjects(suggestedProjs.map((p) => p.id));
+            }
+            onDismiss();
+          }}
+          className="rounded-lg bg-[#8b5cf6] px-3 py-1 text-[12px] font-semibold text-white"
+        >
+          Add all
+        </button>
+        <button
+          onClick={onDismiss}
+          className="rounded-lg border border-[#e5e7eb] px-3 py-1 text-[12px] text-[#6b7280]"
+        >
+          Dismiss
+        </button>
+      </div>
+    </div>
   );
 }

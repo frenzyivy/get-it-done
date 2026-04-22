@@ -11,6 +11,13 @@ module.exports = {
         danger: '#dc2626',
         success: '#10b981',
         warning: '#f59e0b',
+        // Focus Lock (mobile 3-screen flow)
+        'focus-bg': '#3B2F8E',
+        'focus-ring-track': '#4A3FC9',
+        'focus-ring-progress': '#10E4C1',
+        'focus-recommended-badge': '#6B5BF5',
+        'focus-no-mercy-badge': '#E5447A',
+        'focus-warning': '#F5A623',
       },
       fontFamily: {
         sans: ['DMSans_400Regular'],

@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { PRIORITIES } from '@/lib/constants';
 import { useStore } from '@/lib/store';
 import { TagPicker } from './TagPicker';
+import { CategoryPicker } from './CategoryPicker';
+import { ProjectPicker } from './ProjectPicker';
 import { AiSuggestionPanel } from './AiSuggestionPanel';
 import type { Priority, Status } from '@/types';
 
@@ -25,6 +27,8 @@ export function AddTaskForm({
   const [title, setTitle] = useState('');
   const [priority, setPriority] = useState<Priority>('medium');
   const [tagIds, setTagIds] = useState<string[]>([]);
+  const [categoryIds, setCategoryIds] = useState<string[]>([]);
+  const [projectIds, setProjectIds] = useState<string[]>([]);
   const [dueDate, setDueDate] = useState('');
   const [estimateMin, setEstimateMin] = useState<number | null>(null);
   const [pendingSubtasks, setPendingSubtasks] = useState<string[]>([]);
@@ -36,6 +40,8 @@ export function AddTaskForm({
     setTitle('');
     setPriority('medium');
     setTagIds([]);
+    setCategoryIds([]);
+    setProjectIds([]);
     setDueDate('');
     setEstimateMin(null);
     setPendingSubtasks([]);
@@ -49,6 +55,8 @@ export function AddTaskForm({
       title: title.trim(),
       priority,
       tag_ids: tagIds,
+      category_ids: categoryIds,
+      project_ids: projectIds,
       due_date: dueDate || null,
       status: defaultStatus,
       estimated_seconds: estimateMin ? estimateMin * 60 : null,
@@ -105,6 +113,8 @@ export function AddTaskForm({
             </option>
           ))}
         </select>
+        <CategoryPicker selectedIds={categoryIds} onChange={setCategoryIds} />
+        <ProjectPicker selectedIds={projectIds} onChange={setProjectIds} />
         <TagPicker tags={tags} selectedIds={tagIds} onChange={setTagIds} />
         <input
           type="date"
@@ -170,9 +180,17 @@ export function AddTaskForm({
         taskTitle={title}
         dueDate={dueDate || null}
         selectedTagIds={tagIds}
+        selectedCategoryIds={categoryIds}
+        selectedProjectIds={projectIds}
         onAcceptSubtasks={(titles) => setPendingSubtasks((prev) => [...prev, ...titles])}
         onAcceptTags={(ids) =>
           setTagIds((prev) => Array.from(new Set([...prev, ...ids])))
+        }
+        onAcceptCategories={(ids) =>
+          setCategoryIds((prev) => Array.from(new Set([...prev, ...ids])))
+        }
+        onAcceptProjects={(ids) =>
+          setProjectIds((prev) => Array.from(new Set([...prev, ...ids])))
         }
         onAcceptEstimate={(seconds) => setEstimateMin(Math.round(seconds / 60))}
       />

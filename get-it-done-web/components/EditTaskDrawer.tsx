@@ -20,6 +20,8 @@ import { PRIORITIES } from '@/lib/constants';
 import { useStore } from '@/lib/store';
 import { todayISO, tomorrowISO } from '@/lib/utils';
 import { TagPicker } from './TagPicker';
+import { CategoryPicker } from './CategoryPicker';
+import { ProjectPicker } from './ProjectPicker';
 import type { Priority, SubtaskType } from '@/types';
 
 // Feature 3 — full edit drawer. Opens from TaskCard pencil icon and from
@@ -34,6 +36,8 @@ export function EditTaskDrawer({ taskId, onClose }: Props) {
   const tags = useStore((s) => s.tags);
   const updateTask = useStore((s) => s.updateTask);
   const updateTaskTags = useStore((s) => s.updateTaskTags);
+  const updateTaskCategories = useStore((s) => s.updateTaskCategories);
+  const updateTaskProjects = useStore((s) => s.updateTaskProjects);
   const addSubtask = useStore((s) => s.addSubtask);
   const renameSubtask = useStore((s) => s.renameSubtask);
   const deleteSubtask = useStore((s) => s.deleteSubtask);
@@ -47,6 +51,8 @@ export function EditTaskDrawer({ taskId, onClose }: Props) {
     task?.estimated_seconds ? Math.round(task.estimated_seconds / 60) : null,
   );
   const [tagIds, setTagIds] = useState<string[]>(task?.tag_ids ?? []);
+  const [categoryIds, setCategoryIds] = useState<string[]>(task?.category_ids ?? []);
+  const [projectIds, setProjectIds] = useState<string[]>(task?.project_ids ?? []);
   const [allowAlarms, setAllowAlarms] = useState<boolean>(task?.allow_alarms ?? false);
   const [plannedForDate, setPlannedForDate] = useState<string>(task?.planned_for_date ?? '');
   const [newSub, setNewSub] = useState('');
@@ -86,6 +92,18 @@ export function EditTaskDrawer({ taskId, onClose }: Props) {
       tagIds.some((id) => !task.tag_ids.includes(id))
     ) {
       await updateTaskTags(task.id, tagIds);
+    }
+    if (
+      categoryIds.length !== task.category_ids.length ||
+      categoryIds.some((id) => !task.category_ids.includes(id))
+    ) {
+      await updateTaskCategories(task.id, categoryIds);
+    }
+    if (
+      projectIds.length !== task.project_ids.length ||
+      projectIds.some((id) => !task.project_ids.includes(id))
+    ) {
+      await updateTaskProjects(task.id, projectIds);
     }
     onClose();
   };
@@ -250,6 +268,14 @@ export function EditTaskDrawer({ taskId, onClose }: Props) {
                 </button>
               )}
             </div>
+          </Field>
+
+          <Field label="Category">
+            <CategoryPicker selectedIds={categoryIds} onChange={setCategoryIds} />
+          </Field>
+
+          <Field label="Project">
+            <ProjectPicker selectedIds={projectIds} onChange={setProjectIds} />
           </Field>
 
           <Field label="Tags">

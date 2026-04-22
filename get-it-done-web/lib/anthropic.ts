@@ -16,6 +16,7 @@ function anthropic() {
 export type AgentKey =
   | 'generate_subtasks'
   | 'smart_tag'
+  | 'suggest_labels'
   | 'estimate_task'
   | 'smart_priority'
   | 'daily_summary'

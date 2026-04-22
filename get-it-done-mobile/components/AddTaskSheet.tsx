@@ -14,6 +14,8 @@ import DateTimePicker, {
 import { PRIORITIES } from '@/lib/constants';
 import { useStore } from '@/lib/store';
 import { TagPicker } from './TagPicker';
+import { CategoryPicker } from './CategoryPicker';
+import { ProjectPicker } from './ProjectPicker';
 import { AiSuggestionPanel } from './AiSuggestionPanel';
 import type { Priority, Status } from '@/types';
 
@@ -30,6 +32,8 @@ export const AddTaskSheet = forwardRef<AddTaskSheetHandle>(function AddTaskSheet
   const [title, setTitle] = useState('');
   const [priority, setPriority] = useState<Priority>('medium');
   const [tagIds, setTagIds] = useState<string[]>([]);
+  const [categoryIds, setCategoryIds] = useState<string[]>([]);
+  const [projectIds, setProjectIds] = useState<string[]>([]);
   const [dueDate, setDueDate] = useState<Date | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [estimateMin, setEstimateMin] = useState<number | null>(null);
@@ -52,6 +56,8 @@ export const AddTaskSheet = forwardRef<AddTaskSheetHandle>(function AddTaskSheet
     setTitle('');
     setPriority('medium');
     setTagIds([]);
+    setCategoryIds([]);
+    setProjectIds([]);
     setDueDate(null);
     setEstimateMin(null);
     setPendingSubtasks([]);
@@ -65,6 +71,8 @@ export const AddTaskSheet = forwardRef<AddTaskSheetHandle>(function AddTaskSheet
       title: trimmed,
       priority,
       tag_ids: tagIds,
+      category_ids: categoryIds,
+      project_ids: projectIds,
       due_date: dueDate ? dueDate.toISOString().slice(0, 10) : null,
       status: defaultStatusRef.current,
       estimated_seconds: estimateMin ? estimateMin * 60 : null,
@@ -189,6 +197,14 @@ export const AddTaskSheet = forwardRef<AddTaskSheetHandle>(function AddTaskSheet
               })}
             </View>
           </ScrollView>
+
+          <View style={{ marginBottom: 16 }}>
+            <CategoryPicker selectedIds={categoryIds} onChange={setCategoryIds} />
+          </View>
+
+          <View style={{ marginBottom: 16 }}>
+            <ProjectPicker selectedIds={projectIds} onChange={setProjectIds} />
+          </View>
 
           <View style={{ marginBottom: 16 }}>
             <TagPicker tags={tags} selectedIds={tagIds} onChange={setTagIds} />
@@ -339,11 +355,19 @@ export const AddTaskSheet = forwardRef<AddTaskSheetHandle>(function AddTaskSheet
           <AiSuggestionPanel
             taskTitle={title}
             selectedTagIds={tagIds}
+            selectedCategoryIds={categoryIds}
+            selectedProjectIds={projectIds}
             onAcceptSubtasks={(titles) =>
               setPendingSubtasks((prev) => [...prev, ...titles])
             }
             onAcceptTags={(ids) =>
               setTagIds((prev) => Array.from(new Set([...prev, ...ids])))
+            }
+            onAcceptCategories={(ids) =>
+              setCategoryIds((prev) => Array.from(new Set([...prev, ...ids])))
+            }
+            onAcceptProjects={(ids) =>
+              setProjectIds((prev) => Array.from(new Set([...prev, ...ids])))
             }
             onAcceptEstimate={(seconds) => setEstimateMin(Math.round(seconds / 60))}
           />

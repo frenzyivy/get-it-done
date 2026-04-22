@@ -5,6 +5,7 @@ import { fmt } from '@/lib/utils';
 import { useStore } from '@/lib/store';
 import { useLiveTimers } from '@/lib/useLiveTimer';
 import type { FocusMode } from '@/types';
+import { BreakingOutModal } from './BreakingOutModal';
 
 // New-spec-1 Feature 5 — dedicated deep-work surface.
 // Mounts at the root when `focusSessionId` is set in the store. Renders on top
@@ -30,6 +31,9 @@ export function FocusModeView() {
   const appendDriftEvent = useStore((s) => s.appendDriftEvent);
   const closeFocusMode = useStore((s) => s.closeFocusMode);
   const openFocusMode = useStore((s) => s.openFocusMode);
+  const completeSession = useStore((s) => s.completeSession);
+  const markSessionBroken = useStore((s) => s.markSessionBroken);
+  const profileV2 = useStore((s) => s.profileV2);
 
   const elapsedMap = useLiveTimers();
 
@@ -45,6 +49,7 @@ export function FocusModeView() {
   );
   const [modePickerOpen, setModePickerOpen] = useState(false);
   const [paused, setPaused] = useState(false);
+  const [breakingOut, setBreakingOut] = useState(false);
 
   const task = session ? tasks.find((t) => t.id === session.task_id) ?? null : null;
   const subtask = session && task
@@ -137,17 +142,25 @@ export function FocusModeView() {
 
   const handleStop = useCallback(async () => {
     if (!session) return;
-    if (session.mode === 'strict') {
-      const ok = confirm(
-        'Stopping a Strict Zone session. This will be recorded. Are you sure?',
-      );
-      if (!ok) return;
+    const elapsedSecs =
+      (Date.now() - new Date(session.started_at).getTime()) / 1000;
+    const planned = session.planned_duration_seconds;
+    // Strict + planned block still running → gate on BreakingOutModal. The
+    // write (broken=true + reason) lives inside the modal's onConfirm.
+    if (session.mode === 'strict' && planned != null && elapsedSecs < planned) {
+      setBreakingOut(true);
+      return;
     }
-    await stopSession(session.id);
+    // Planned block reached zero — count it toward the streak.
+    if (planned != null && elapsedSecs >= planned) {
+      await completeSession(session.id);
+    } else {
+      await stopSession(session.id);
+    }
     if (document.fullscreenElement) {
       document.exitFullscreen?.().catch(() => undefined);
     }
-  }, [session, stopSession]);
+  }, [session, stopSession, completeSession]);
 
   const handlePause = useCallback(async () => {
     if (!session) return;
@@ -155,17 +168,18 @@ export function FocusModeView() {
     await pauseSession(session.id);
   }, [session, pauseSession]);
 
-  // Esc closes the overlay for non-strict modes.
+  // Esc: Strict + still in planned block → BreakingOutModal; else minimize.
   useEffect(() => {
     if (!session) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       if (session.mode === 'strict') {
-        const ok = confirm(
-          'Exit Strict Zone? This will be recorded as a drift.',
-        );
-        if (!ok) {
+        const elapsedSecs =
+          (Date.now() - new Date(session.started_at).getTime()) / 1000;
+        const planned = session.planned_duration_seconds;
+        if (planned != null && elapsedSecs < planned) {
           e.preventDefault();
+          setBreakingOut(true);
           return;
         }
       }
@@ -182,6 +196,7 @@ export function FocusModeView() {
   const otherActive = activeSessions.filter((s) => s.id !== session.id);
 
   return (
+    <>
     <div
       ref={overlayRef}
       className="fixed inset-0 z-[100] flex flex-col items-center justify-between py-10 px-6"
@@ -298,6 +313,21 @@ export function FocusModeView() {
         </button>
       </div>
     </div>
+    <BreakingOutModal
+      visible={breakingOut}
+      elapsedSeconds={elapsed}
+      plannedSeconds={session.planned_duration_seconds}
+      streak={profileV2?.current_streak ?? 0}
+      onCancel={() => setBreakingOut(false)}
+      onConfirm={async (reason) => {
+        await markSessionBroken(session.id, reason);
+        setBreakingOut(false);
+        if (document.fullscreenElement) {
+          document.exitFullscreen?.().catch(() => undefined);
+        }
+      }}
+    />
+    </>
   );
 }
 

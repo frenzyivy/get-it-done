@@ -10,6 +10,15 @@ import { TopAppBar } from '@/components/TopAppBar';
 import { M3BottomNav } from '@/components/M3BottomNav';
 import { FAB } from '@/components/FAB';
 import { TagManagerSheet, type TagManagerHandle } from '@/components/TagManagerSheet';
+import {
+  CategoryManagerSheet,
+  type CategoryManagerHandle,
+} from '@/components/CategoryManagerSheet';
+import {
+  ProjectManagerSheet,
+  type ProjectManagerHandle,
+} from '@/components/ProjectManagerSheet';
+import { OverflowMenu, type OverflowMenuHandle } from '@/components/OverflowMenu';
 import { AddTaskSheet, type AddTaskSheetHandle } from '@/components/AddTaskSheet';
 import {
   NotificationSheet,
@@ -59,6 +68,9 @@ export default function TabsLayout() {
   const routeKey = lastSeg === '(tabs)' ? 'index' : lastSeg;
   const header = TITLES[routeKey] ?? TITLES.index;
   const tagSheetRef = useRef<TagManagerHandle>(null);
+  const categorySheetRef = useRef<CategoryManagerHandle>(null);
+  const projectSheetRef = useRef<ProjectManagerHandle>(null);
+  const overflowRef = useRef<OverflowMenuHandle>(null);
   const addSheetRef = useRef<AddTaskSheetHandle>(null);
   const notifSheetRef = useRef<NotificationSheetHandle>(null);
   const editSheetRef = useRef<EditTaskSheetHandle>(null);
@@ -110,7 +122,25 @@ export default function TabsLayout() {
           subtitle={header.subtitle}
           unreadCount={unreadCount}
           onOpenNotifications={() => notifSheetRef.current?.open()}
-          onOpenOverflow={() => tagSheetRef.current?.open()}
+          onOpenOverflow={() =>
+            overflowRef.current?.open([
+              {
+                icon: '🎯',
+                label: 'Categories',
+                onPress: () => categorySheetRef.current?.open(),
+              },
+              {
+                icon: '★',
+                label: 'Projects',
+                onPress: () => projectSheetRef.current?.open(),
+              },
+              {
+                icon: '#',
+                label: 'Tags',
+                onPress: () => tagSheetRef.current?.open(),
+              },
+            ])
+          }
         />
         <TrackingCard />
 
@@ -163,6 +193,9 @@ export default function TabsLayout() {
         )}
 
         <TagManagerSheet ref={tagSheetRef} />
+        <CategoryManagerSheet ref={categorySheetRef} />
+        <ProjectManagerSheet ref={projectSheetRef} />
+        <OverflowMenu ref={overflowRef} />
         <AddTaskSheet ref={addSheetRef} />
         <NotificationSheet ref={notifSheetRef} />
         <EditTaskSheet ref={editSheetRef} />

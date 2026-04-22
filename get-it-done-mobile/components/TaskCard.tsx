@@ -13,6 +13,8 @@ import { useLiveTimers } from '@/lib/useLiveTimer';
 import { useUI } from '@/lib/ui-context';
 import { PriorityBadge } from './PriorityBadge';
 import { TagBadge } from './TagBadge';
+import { CategoryPill } from './CategoryPill';
+import { ProjectBadge } from './ProjectBadge';
 import { ProgressBar } from './ProgressBar';
 import { SubtaskItem } from './SubtaskItem';
 import { AddSubtask } from './AddSubtask';
@@ -27,6 +29,8 @@ interface Props {
 export function TaskCard({ task, compact = false }: Props) {
   const [expanded, setExpanded] = useState(false);
   const tags = useStore((s) => s.tags);
+  const categories = useStore((s) => s.categories);
+  const projects = useStore((s) => s.projects);
   const deleteTask = useStore((s) => s.deleteTask);
   const updateTask = useStore((s) => s.updateTask);
   const addSubtask = useStore((s) => s.addSubtask);
@@ -38,7 +42,7 @@ export function TaskCard({ task, compact = false }: Props) {
   const stopSession = useStore((s) => s.stopSession);
   const openFocusMode = useStore((s) => s.openFocusMode);
   const prefs = useStore((s) => s.prefs);
-  const { openEditTask } = useUI();
+  const { openEditTask, openFocusLockPicker } = useUI();
 
   const elapsedMap = useLiveTimers();
 
@@ -138,6 +142,12 @@ export function TaskCard({ task, compact = false }: Props) {
   const progress = getProgress(task.subtasks);
   const overdue = isOverdue(task.due_date, task.status);
   const taskTags = task.tag_ids.map((id) => tags.find((t) => t.id === id));
+  const taskCategories = task.category_ids
+    .map((id) => categories.find((c) => c.id === id))
+    .filter((c): c is NonNullable<typeof c> => !!c);
+  const taskProjects = task.project_ids
+    .map((id) => projects.find((p) => p.id === id))
+    .filter((p): p is NonNullable<typeof p> => !!p);
 
   const { timerIcon, panel, running } = PomodoroTimer({ task });
 
@@ -304,6 +314,12 @@ export function TaskCard({ task, compact = false }: Props) {
             }}
           >
             <PriorityBadge priority={task.priority} />
+            {taskCategories.map((c) => (
+              <CategoryPill key={c.id} category={c} />
+            ))}
+            {taskProjects.map((p) => (
+              <ProjectBadge key={p.id} project={p} />
+            ))}
             {taskTags.map((t, i) => (
               <TagBadge key={t?.id ?? i} tag={t} />
             ))}
@@ -323,7 +339,20 @@ export function TaskCard({ task, compact = false }: Props) {
 
         <Pressable
           onPress={handleQuickPlay}
+          onLongPress={() => {
+            if (isTrackingThisTask) return;
+            openFocusLockPicker(task.id);
+          }}
+          delayLongPress={350}
           hitSlop={6}
+          accessibilityLabel={
+            isTrackingThisTask ? 'Pause tracking' : 'Start tracking'
+          }
+          accessibilityHint={
+            isTrackingThisTask
+              ? undefined
+              : 'Long-press to pick a focus lock level'
+          }
           style={{
             width: 26,
             height: 26,

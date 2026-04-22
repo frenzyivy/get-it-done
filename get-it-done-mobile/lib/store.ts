@@ -1,8 +1,12 @@
 import { create } from 'zustand';
 import { supabase } from './supabase';
+import { labelsApi } from './labels-api';
 import type {
   TaskType,
   TagType,
+  CategoryType,
+  ProjectType,
+  ProjectStatus,
   SubtaskType,
   TimeSession,
   ViewMode,
@@ -17,6 +21,8 @@ import type {
   PlannedBlock,
   FocusMode,
   DriftEvent,
+  RecurringTemplate,
+  NewRecurringTemplateInput,
 } from '@/types';
 
 interface TaskRow {
@@ -34,6 +40,8 @@ interface TaskRow {
   planned_for_date: string | null;
   subtasks: SubtaskType[] | null;
   task_tags: { tag_id: string }[] | null;
+  task_categories: { category_id: string }[] | null;
+  task_projects: { project_id: string }[] | null;
   time_sessions: TimeSession[] | null;
 }
 
@@ -55,6 +63,8 @@ function rowToTask(row: TaskRow): TaskType {
     allow_alarms: row.allow_alarms ?? false,
     planned_for_date: row.planned_for_date ?? null,
     tag_ids: (row.task_tags ?? []).map((t) => t.tag_id),
+    category_ids: (row.task_categories ?? []).map((c) => c.category_id),
+    project_ids: (row.task_projects ?? []).map((p) => p.project_id),
     subtasks,
     sessions: row.time_sessions ?? [],
   };
@@ -63,6 +73,8 @@ function rowToTask(row: TaskRow): TaskType {
 interface Store {
   tasks: TaskType[];
   tags: TagType[];
+  categories: CategoryType[];
+  projects: ProjectType[];
   view: ViewMode;
   userId: string | null;
   loading: boolean;
@@ -79,6 +91,8 @@ interface Store {
   tickRunningTimer: () => void;
 
   fetchTags: () => Promise<void>;
+  fetchCategories: () => Promise<void>;
+  fetchProjects: () => Promise<void>;
   fetchTasks: () => Promise<void>;
   fetchAll: () => Promise<void>;
 
@@ -124,6 +138,16 @@ interface Store {
   closeFocusMode: () => void;
   clearStopSummary: () => void;
 
+  recurringTemplates: RecurringTemplate[];
+  fetchRecurringTemplates: () => Promise<void>;
+  addRecurringTemplate: (input: NewRecurringTemplateInput) => Promise<void>;
+  updateRecurringTemplate: (
+    id: string,
+    updates: Partial<NewRecurringTemplateInput>,
+  ) => Promise<void>;
+  deleteRecurringTemplate: (id: string) => Promise<void>;
+  toggleRecurringTemplate: (id: string, isEnabled: boolean) => Promise<void>;
+
   plannedBlocks: PlannedBlock[];
   fetchPlannedBlocks: (fromISO: string, toISO: string) => Promise<void>;
   addPlannedBlock: (input: Omit<PlannedBlock, 'id' | 'user_id'>) => Promise<void>;
@@ -152,11 +176,37 @@ interface Store {
   addTag: (name: string, color: string) => Promise<void>;
   deleteTag: (id: string) => Promise<void>;
   updateTaskTags: (taskId: string, tagIds: string[]) => Promise<void>;
+
+  // Categories (AGENT1).
+  addCategory: (name: string, color?: string) => Promise<CategoryType | null>;
+  updateCategory: (id: string, updates: { name?: string; color?: string }) => Promise<void>;
+  deleteCategory: (id: string) => Promise<void>;
+  attachCategoryToTask: (taskId: string, categoryId: string) => Promise<void>;
+  detachCategoryFromTask: (taskId: string, categoryId: string) => Promise<void>;
+  updateTaskCategories: (taskId: string, categoryIds: string[]) => Promise<void>;
+
+  // Projects (AGENT1).
+  addProject: (
+    name: string,
+    color?: string,
+    status?: ProjectStatus,
+  ) => Promise<ProjectType | null>;
+  updateProject: (
+    id: string,
+    updates: { name?: string; color?: string; status?: ProjectStatus },
+  ) => Promise<void>;
+  setProjectStatus: (id: string, status: ProjectStatus) => Promise<void>;
+  deleteProject: (id: string) => Promise<void>;
+  attachProjectToTask: (taskId: string, projectId: string) => Promise<void>;
+  detachProjectFromTask: (taskId: string, projectId: string) => Promise<void>;
+  updateTaskProjects: (taskId: string, projectIds: string[]) => Promise<void>;
 }
 
 export const useStore = create<Store>((set, get) => ({
   tasks: [],
   tags: [],
+  categories: [],
+  projects: [],
   view: 'kanban',
   userId: null,
   loading: false,
@@ -179,8 +229,12 @@ export const useStore = create<Store>((set, get) => ({
 
   fetchAll: async () => {
     set({ loading: true });
-    await Promise.all([
+    // allSettled so one failing fetcher (e.g. categories before its migration
+    // runs) doesn't prevent the rest from loading.
+    const results = await Promise.allSettled([
       get().fetchTags(),
+      get().fetchCategories(),
+      get().fetchProjects(),
       get().fetchTasks(),
       get().fetchNotifications(),
       get().fetchPrefs(),
@@ -188,6 +242,9 @@ export const useStore = create<Store>((set, get) => ({
       get().fetchProfileV2(),
       get().fetchActiveSessions(),
     ]);
+    for (const r of results) {
+      if (r.status === 'rejected') console.error('[store.fetchAll]', r.reason);
+    }
     set({ loading: false });
     get().subscribeNotifications();
   },
@@ -595,6 +652,70 @@ export const useStore = create<Store>((set, get) => ({
 
   plannedBlocks: [],
 
+  recurringTemplates: [],
+
+  fetchRecurringTemplates: async () => {
+    const { userId } = get();
+    if (!userId) return;
+    const { data, error } = await supabase
+      .from('recurring_templates')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    set({ recurringTemplates: (data ?? []) as RecurringTemplate[] });
+  },
+
+  addRecurringTemplate: async (input) => {
+    const { userId } = get();
+    if (!userId) return;
+    const { data, error } = await supabase
+      .from('recurring_templates')
+      .insert({ ...input, user_id: userId })
+      .select()
+      .single();
+    if (error) throw error;
+    set((s) => ({
+      recurringTemplates: [data as RecurringTemplate, ...s.recurringTemplates],
+    }));
+  },
+
+  updateRecurringTemplate: async (id, updates) => {
+    const prev = get().recurringTemplates;
+    set((s) => ({
+      recurringTemplates: s.recurringTemplates.map((t) =>
+        t.id === id ? { ...t, ...updates } : t,
+      ),
+    }));
+    const { error } = await supabase
+      .from('recurring_templates')
+      .update(updates)
+      .eq('id', id);
+    if (error) {
+      set({ recurringTemplates: prev });
+      throw error;
+    }
+  },
+
+  deleteRecurringTemplate: async (id) => {
+    const prev = get().recurringTemplates;
+    set((s) => ({
+      recurringTemplates: s.recurringTemplates.filter((t) => t.id !== id),
+    }));
+    const { error } = await supabase
+      .from('recurring_templates')
+      .delete()
+      .eq('id', id);
+    if (error) {
+      set({ recurringTemplates: prev });
+      throw error;
+    }
+  },
+
+  toggleRecurringTemplate: async (id, isEnabled) => {
+    await get().updateRecurringTemplate(id, { is_enabled: isEnabled });
+  },
+
   fetchPlannedBlocks: async (fromISO, toISO) => {
     const { userId } = get();
     if (!userId) return;
@@ -674,6 +795,8 @@ export const useStore = create<Store>((set, get) => ({
         planned_for_date,
         subtasks ( id, task_id, title, is_done, total_time_seconds, sort_order ),
         task_tags ( tag_id ),
+        task_categories ( category_id ),
+        task_projects ( project_id ),
         time_sessions ( id, task_id, subtask_id, started_at, duration_seconds, label )
       `,
       )
@@ -701,11 +824,22 @@ export const useStore = create<Store>((set, get) => ({
       .single();
     if (error) throw error;
     const task = data as TaskRow;
+    const categoryIds = input.category_ids ?? [];
+    const projectIds = input.project_ids ?? [];
     if (input.tag_ids.length > 0) {
       const { error: tagErr } = await supabase
         .from('task_tags')
         .insert(input.tag_ids.map((tag_id) => ({ task_id: task.id, tag_id })));
       if (tagErr) throw tagErr;
+    }
+    // Category/project attaches go through the labels API (bearer token) so we
+    // stay consistent with how web handles them. Fire-and-await in sequence is
+    // fine for new tasks (usually 0–2 of each).
+    for (const categoryId of categoryIds) {
+      await labelsApi.attachCategory(task.id, categoryId);
+    }
+    for (const projectId of projectIds) {
+      await labelsApi.attachProject(task.id, projectId);
     }
     const newTask: TaskType = {
       ...rowToTask({
@@ -715,9 +849,13 @@ export const useStore = create<Store>((set, get) => ({
         planned_for_date: task.planned_for_date ?? null,
         subtasks: [],
         task_tags: [],
+        task_categories: [],
+        task_projects: [],
         time_sessions: [],
       }),
       tag_ids: input.tag_ids,
+      category_ids: categoryIds,
+      project_ids: projectIds,
     };
     set((s) => ({ tasks: [...s.tasks, newTask] }));
     return task.id;
@@ -974,5 +1112,207 @@ export const useStore = create<Store>((set, get) => ({
         throw insErr;
       }
     }
+  },
+
+  // ---- Categories (AGENT1) ------------------------------------------------
+  fetchCategories: async () => {
+    const { userId } = get();
+    if (!userId) return;
+    const { data, error } = await supabase
+      .from('categories')
+      .select('id, name, color')
+      .eq('user_id', userId)
+      .order('sort_order', { ascending: true });
+    if (error) throw error;
+    set({ categories: (data ?? []) as CategoryType[] });
+  },
+
+  addCategory: async (name, color) => {
+    const res = await labelsApi.createCategory({ name, color });
+    if (!res) return null;
+    const { category } = res;
+    set((s) => ({ categories: [...s.categories, category] }));
+    return category;
+  },
+
+  updateCategory: async (id, updates) => {
+    const prev = get().categories;
+    set((s) => ({
+      categories: s.categories.map((c) => (c.id === id ? { ...c, ...updates } : c)),
+    }));
+    try {
+      await labelsApi.updateCategory(id, updates);
+    } catch (err) {
+      set({ categories: prev });
+      throw err;
+    }
+  },
+
+  deleteCategory: async (id) => {
+    const prevCats = get().categories;
+    const prevTasks = get().tasks;
+    set((s) => ({
+      categories: s.categories.filter((c) => c.id !== id),
+      tasks: s.tasks.map((t) => ({
+        ...t,
+        category_ids: t.category_ids.filter((x) => x !== id),
+      })),
+    }));
+    try {
+      await labelsApi.deleteCategory(id);
+    } catch (err) {
+      set({ categories: prevCats, tasks: prevTasks });
+      throw err;
+    }
+  },
+
+  attachCategoryToTask: async (taskId, categoryId) => {
+    const prev = get().tasks;
+    set((s) => ({
+      tasks: s.tasks.map((t) =>
+        t.id === taskId && !t.category_ids.includes(categoryId)
+          ? { ...t, category_ids: [...t.category_ids, categoryId] }
+          : t,
+      ),
+    }));
+    try {
+      await labelsApi.attachCategory(taskId, categoryId);
+    } catch (err) {
+      set({ tasks: prev });
+      throw err;
+    }
+  },
+
+  detachCategoryFromTask: async (taskId, categoryId) => {
+    const prev = get().tasks;
+    set((s) => ({
+      tasks: s.tasks.map((t) =>
+        t.id === taskId
+          ? { ...t, category_ids: t.category_ids.filter((x) => x !== categoryId) }
+          : t,
+      ),
+    }));
+    try {
+      await labelsApi.detachCategory(taskId, categoryId);
+    } catch (err) {
+      set({ tasks: prev });
+      throw err;
+    }
+  },
+
+  updateTaskCategories: async (taskId, categoryIds) => {
+    const task = get().tasks.find((t) => t.id === taskId);
+    if (!task) return;
+    const current = new Set(task.category_ids);
+    const next = new Set(categoryIds);
+    const toAdd = categoryIds.filter((id) => !current.has(id));
+    const toRemove = task.category_ids.filter((id) => !next.has(id));
+    await Promise.all([
+      ...toAdd.map((id) => get().attachCategoryToTask(taskId, id)),
+      ...toRemove.map((id) => get().detachCategoryFromTask(taskId, id)),
+    ]);
+  },
+
+  // ---- Projects (AGENT1) --------------------------------------------------
+  fetchProjects: async () => {
+    const { userId } = get();
+    if (!userId) return;
+    const { data, error } = await supabase
+      .from('projects')
+      .select('id, name, color, status')
+      .eq('user_id', userId)
+      .order('sort_order', { ascending: true });
+    if (error) throw error;
+    set({ projects: (data ?? []) as ProjectType[] });
+  },
+
+  addProject: async (name, color, status) => {
+    const res = await labelsApi.createProject({ name, color, status });
+    if (!res) return null;
+    const { project } = res;
+    set((s) => ({ projects: [...s.projects, project] }));
+    return project;
+  },
+
+  updateProject: async (id, updates) => {
+    const prev = get().projects;
+    set((s) => ({
+      projects: s.projects.map((p) => (p.id === id ? { ...p, ...updates } : p)),
+    }));
+    try {
+      await labelsApi.updateProject(id, updates);
+    } catch (err) {
+      set({ projects: prev });
+      throw err;
+    }
+  },
+
+  setProjectStatus: async (id, status) => {
+    await get().updateProject(id, { status });
+  },
+
+  deleteProject: async (id) => {
+    const prevProjects = get().projects;
+    const prevTasks = get().tasks;
+    set((s) => ({
+      projects: s.projects.filter((p) => p.id !== id),
+      tasks: s.tasks.map((t) => ({
+        ...t,
+        project_ids: t.project_ids.filter((x) => x !== id),
+      })),
+    }));
+    try {
+      await labelsApi.deleteProject(id);
+    } catch (err) {
+      set({ projects: prevProjects, tasks: prevTasks });
+      throw err;
+    }
+  },
+
+  attachProjectToTask: async (taskId, projectId) => {
+    const prev = get().tasks;
+    set((s) => ({
+      tasks: s.tasks.map((t) =>
+        t.id === taskId && !t.project_ids.includes(projectId)
+          ? { ...t, project_ids: [...t.project_ids, projectId] }
+          : t,
+      ),
+    }));
+    try {
+      await labelsApi.attachProject(taskId, projectId);
+    } catch (err) {
+      set({ tasks: prev });
+      throw err;
+    }
+  },
+
+  detachProjectFromTask: async (taskId, projectId) => {
+    const prev = get().tasks;
+    set((s) => ({
+      tasks: s.tasks.map((t) =>
+        t.id === taskId
+          ? { ...t, project_ids: t.project_ids.filter((x) => x !== projectId) }
+          : t,
+      ),
+    }));
+    try {
+      await labelsApi.detachProject(taskId, projectId);
+    } catch (err) {
+      set({ tasks: prev });
+      throw err;
+    }
+  },
+
+  updateTaskProjects: async (taskId, projectIds) => {
+    const task = get().tasks.find((t) => t.id === taskId);
+    if (!task) return;
+    const current = new Set(task.project_ids);
+    const next = new Set(projectIds);
+    const toAdd = projectIds.filter((id) => !current.has(id));
+    const toRemove = task.project_ids.filter((id) => !next.has(id));
+    await Promise.all([
+      ...toAdd.map((id) => get().attachProjectToTask(taskId, id)),
+      ...toRemove.map((id) => get().detachProjectFromTask(taskId, id)),
+    ]);
   },
 }));
