@@ -60,3 +60,6 @@ tmp/
 .claude/
 Get-it-done/
 Get-it-done.zip
+
+# Claude Code auto-memory (local notes, do not commit)
+memory/

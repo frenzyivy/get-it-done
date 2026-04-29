@@ -7,18 +7,24 @@ import { TagManager } from './TagManager';
 import { CategoryManagerModal } from './CategoryManagerModal';
 import { ProjectManagerModal } from './ProjectManagerModal';
 import { BoardView } from './BoardView';
-import { ListView } from './ListView';
+import { ListByProjectView } from './ListByProjectView';
 import { ScheduleView } from './ScheduleView';
 import { TimelineView } from './TimelineView';
+import { PriorityView } from './PriorityView';
+import { CalendarView } from './CalendarView';
 import { DailyGoalBar } from './DailyGoalBar';
 import { NowTrackingBar } from './NowTrackingBar';
 import { ColumnSwitcher } from './ColumnSwitcher';
+import { FilterBar } from './FilterBar';
 import { NotificationBell } from './NotificationBell';
 import { SkeletonBoard } from './Skeleton';
 import { FocusModeView } from './FocusModeView';
 import { RolloverPromptModal } from './RolloverPromptModal';
 import { FloatingAddButton } from './FloatingAddButton';
 import { FocusLockPicker } from './FocusLockPicker';
+import { Toast } from './Toast';
+// QuickAddBar moved to app/layout.tsx (Phase 6 polish) so Ctrl+K works on
+// /insights and /settings too.
 
 // v2 spec §3 — new IA: compact header, then goal bar, now-tracking bar,
 // then the segmented board/list switcher. Sign out moved to Settings.
@@ -32,6 +38,7 @@ export function Dashboard({ userId }: { userId: string }) {
   const fetchAll = useStore((s) => s.fetchAll);
   const unsubscribeNotifications = useStore((s) => s.unsubscribeNotifications);
   const setView = useStore((s) => s.setView);
+  const openQuickAdd = useStore((s) => s.openQuickAdd);
   const [showCategoriesModal, setShowCategoriesModal] = useState(false);
   const [showProjectsModal, setShowProjectsModal] = useState(false);
 
@@ -45,27 +52,35 @@ export function Dashboard({ userId }: { userId: string }) {
     <div
       className="min-h-screen px-4 py-4"
       style={{
-        background: 'linear-gradient(145deg, #f8f7ff 0%, #f0f4ff 50%, #faf5ff 100%)',
+        background: '#e8e8ea',
       }}
     >
       <div className="max-w-[960px] mx-auto">
         {/* Compact header */}
         <header className="flex items-center justify-between mb-3">
           <h1 className="text-[22px] font-extrabold text-[#1a1a2e] tracking-[-0.5px] m-0">
-            <span className="text-[#8b5cf6]">⚡</span> Get-it-done
+            <span className="text-[#1a1a2e]">⚡</span> Get-it-done
           </h1>
           <div className="flex gap-2 items-center">
+            <button
+              onClick={openQuickAdd}
+              className="px-3 py-[6px] rounded-lg border-[1.5px] border-[#1a1a2e] bg-[#1a1a2e] text-xs font-bold text-white hover:opacity-90 transition-opacity inline-flex items-center gap-2"
+              title="Quick add (Ctrl+K)"
+            >
+              ⚡ Quick add
+              <span className="text-[10px] font-mono opacity-60">⌘K</span>
+            </button>
             <NotificationBell />
             <button
               onClick={() => setShowCategoriesModal(true)}
-              className="px-3 py-[6px] rounded-lg border-[1.5px] border-[#d5cafe] bg-[#faf7ff] text-xs font-bold text-[#5a3fd8] hover:border-[#8b5cf6] transition-colors"
+              className="px-3 py-[6px] rounded-lg border-[1.5px] border-[#e5e7eb] bg-[#f3f4f6] text-xs font-bold text-[#1a1a2e] hover:border-[#1a1a2e] transition-colors"
               title="Manage categories"
             >
               🎯 Categories ({categories.length})
             </button>
             <button
               onClick={() => setShowProjectsModal(true)}
-              className="px-3 py-[6px] rounded-lg border-[1.5px] border-[#d5cafe] bg-[#faf7ff] text-xs font-bold text-[#5a3fd8] hover:border-[#8b5cf6] transition-colors"
+              className="px-3 py-[6px] rounded-lg border-[1.5px] border-[#e5e7eb] bg-[#f3f4f6] text-xs font-bold text-[#1a1a2e] hover:border-[#1a1a2e] transition-colors"
               title="Manage projects"
             >
               ★ Projects ({projects.length})
@@ -73,14 +88,14 @@ export function Dashboard({ userId }: { userId: string }) {
             <TagManager />
             <Link
               href="/insights"
-              className="px-3 py-[6px] rounded-lg border-[1.5px] border-[#e5e7eb] bg-white text-xs font-bold text-[#666] hover:border-[#8b5cf6] transition-colors"
+              className="px-3 py-[6px] rounded-lg border-[1.5px] border-[#e5e7eb] bg-white text-xs font-bold text-[#666] hover:border-[#1a1a2e] transition-colors"
               title="Insights"
             >
               📊 Insights
             </Link>
             <Link
               href="/settings"
-              className="px-3 py-[6px] rounded-lg border-[1.5px] border-[#e5e7eb] bg-white text-xs font-bold text-[#666] hover:border-[#8b5cf6] transition-colors"
+              className="px-3 py-[6px] rounded-lg border-[1.5px] border-[#e5e7eb] bg-white text-xs font-bold text-[#666] hover:border-[#1a1a2e] transition-colors"
               title="Settings"
             >
               ⚙ Settings
@@ -105,8 +120,10 @@ export function Dashboard({ userId }: { userId: string }) {
               [
                 { id: 'kanban', icon: '▤', label: 'Board' },
                 { id: 'list', icon: '☰', label: 'List' },
+                { id: 'priority', icon: '!', label: 'Priority' },
                 { id: 'schedule', icon: '⏱', label: 'Schedule' },
                 { id: 'timeline', icon: '◧', label: 'Timeline' },
+                { id: 'calendar', icon: '◯', label: 'Calendar' },
               ] as const
             ).map((v) => (
               <button
@@ -114,7 +131,7 @@ export function Dashboard({ userId }: { userId: string }) {
                 onClick={() => setView(v.id)}
                 className="px-3 py-[6px] rounded-[10px] border-0 cursor-pointer text-xs font-bold transition-all"
                 style={{
-                  background: view === v.id ? '#8b5cf6' : 'transparent',
+                  background: view === v.id ? '#1a1a2e' : 'transparent',
                   color: view === v.id ? '#fff' : '#888',
                 }}
               >
@@ -129,14 +146,24 @@ export function Dashboard({ userId }: { userId: string }) {
           )}
         </div>
 
+        {/* Filter bar — Board / List / Priority. Schedule + Timeline drive
+            their own data shape and aren't filter-aware in this step. */}
+        {(view === 'kanban' || view === 'list' || view === 'priority') && (
+          <FilterBar />
+        )}
+
         {loading && tasks.length === 0 ? (
           <SkeletonBoard />
         ) : view === 'kanban' ? (
           <BoardView />
         ) : view === 'list' ? (
-          <ListView />
+          <ListByProjectView />
+        ) : view === 'priority' ? (
+          <PriorityView />
         ) : view === 'schedule' ? (
           <ScheduleView />
+        ) : view === 'calendar' ? (
+          <CalendarView />
         ) : (
           <TimelineView />
         )}
@@ -145,6 +172,7 @@ export function Dashboard({ userId }: { userId: string }) {
       <RolloverPromptModal />
       <FloatingAddButton />
       <FocusLockPicker />
+      <Toast />
       {showCategoriesModal && (
         <CategoryManagerModal onClose={() => setShowCategoriesModal(false)} />
       )}

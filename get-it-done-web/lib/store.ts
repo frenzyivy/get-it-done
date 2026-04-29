@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import { supabase } from './supabase';
 import type {
   TaskType,
@@ -23,7 +24,18 @@ import type {
   NewRecurringTemplateInput,
   InsightsPayload,
   InsightsRange,
+  Filters,
+  SavedView,
+  SavedViewType,
+  DailyTargets,
 } from '@/types';
+
+const EMPTY_FILTERS: Filters = {
+  project_ids: [],
+  category_ids: [],
+  tag_ids: [],
+  priorities: [],
+};
 
 interface TaskRow {
   id: string;
@@ -31,6 +43,7 @@ interface TaskRow {
   title: string;
   description: string | null;
   status: Status;
+  completed_at: string | null;
   priority: TaskType['priority'];
   due_date: string | null;
   total_time_seconds: number;
@@ -45,7 +58,29 @@ interface TaskRow {
   time_sessions: TimeSession[] | null;
 }
 
-function rowToTask(row: TaskRow): TaskType {
+/**
+ * Mirror of v_task_status (migration 0023) — used for OPTIMISTIC updates only.
+ * The DB-derived value from v_task_status is the source of truth and replaces
+ * this on the next fetchTasks. Mirroring the SQL avoids visual flicker between
+ * a write and the refetch.
+ *
+ * Limitation: v_task_status promotes a task to 'in_progress' when there's an
+ * OPEN session on it (ended_at IS NULL). `task.sessions` only contains closed
+ * time_sessions rows, so this helper can't see open sessions on its own. For
+ * Done-checkbox toggles (where completed_at is the only thing changing) and
+ * for any update that doesn't start/stop a session, this is fine. Open
+ * sessions are managed separately via `activeSessions[]`.
+ */
+function deriveEffectiveStatus(
+  task: Pick<TaskType, 'completed_at' | 'sessions'>,
+): Status {
+  if (task.completed_at) return 'done';
+  const hasWork = task.sessions.some((s) => (s.duration_seconds ?? 0) > 0);
+  if (hasWork) return 'in_progress';
+  return 'todo';
+}
+
+function rowToTask(row: TaskRow, effectiveStatus: Status): TaskType {
   const subtasks = (row.subtasks ?? [])
     .slice()
     .sort((a, b) => a.sort_order - b.sort_order);
@@ -55,6 +90,8 @@ function rowToTask(row: TaskRow): TaskType {
     title: row.title,
     description: row.description ?? null,
     status: row.status,
+    effective_status: effectiveStatus,
+    completed_at: row.completed_at ?? null,
     priority: row.priority,
     due_date: row.due_date,
     total_time_seconds: row.total_time_seconds,
@@ -216,6 +253,84 @@ interface Store {
   detachProjectFromTask: (taskId: string, projectId: string) => Promise<void>;
   updateTaskProjects: (taskId: string, projectIds: string[]) => Promise<void>;
 
+  // Transient toast (Change #1 bounce-back, plus any future ephemeral
+  // feedback). `id` increments per toast so an auto-dismiss timer can detect
+  // whether a newer toast superseded it.
+  toast: { message: string; id: number } | null;
+  showToast: (message: string) => void;
+  dismissToast: (id?: number) => void;
+
+  // Quick-add command bar (Phase 5 step 15) — global open state. Ctrl/Cmd+K
+  // toggles; Esc / outside-click / submit close. Component owns the input
+  // buffer and parse state internally.
+  quickAddOpen: boolean;
+  openQuickAdd: () => void;
+  closeQuickAdd: () => void;
+
+  // Filter bar (Change #4) — across-dimensions AND, within-dimension OR.
+  // Persisted via zustand/middleware/persist on the `filters` slice only.
+  filters: Filters;
+  setFilters: (f: Filters) => void;
+  clearFilter: (dim: keyof Filters, value: string) => void;
+  clearAllFilters: () => void;
+
+  // Calendar view (Phase 3 step 10) — per-weekday hour goals + per-day
+  // tracked seconds. `dailyTargets` is one row from `daily_targets`;
+  // `secondsByDay` is keyed YYYY-MM-DD in user tz, populated by
+  // fetchSessionsByDay(from, to).
+  dailyTargets: DailyTargets | null;
+  fetchDailyTargets: () => Promise<void>;
+  updateDailyTargets: (updates: Partial<DailyTargets>) => Promise<void>;
+  secondsByDay: Record<string, number>;
+  secondsByDayRange: { from: string; to: string } | null;
+  fetchSessionsByDay: (from: string, to: string) => Promise<void>;
+
+  // Schedule view (Phase 6 step 17) — detailed sessions for a single day, used
+  // to render the "actual" overlay alongside planned blocks. Key is the
+  // YYYY-MM-DD date the data was fetched for.
+  daySessions: {
+    date: string;
+    sessions: {
+      id: string;
+      task_id: string | null;
+      subtask_id: string | null;
+      started_at: string;
+      ended_at: string | null;
+      duration_seconds: number | null;
+      mode: string | null;
+    }[];
+  } | null;
+  fetchDaySessions: (date: string, force?: boolean) => Promise<void>;
+
+  // When You Work heatmap (Phase 4 step 12) — 7x24 matrix from
+  // /api/sessions/by-hour-of-week, keyed [day][hour] where day is 0=Sun..6=Sat
+  // (matching JS Date.getDay()). Range is local to the heatmap card.
+  hourOfWeekRange: '7d' | '30d' | '90d';
+  hourOfWeekMatrix: number[][] | null;
+  hourOfWeekFetchedFor: '7d' | '30d' | '90d' | null;
+  setHourOfWeekRange: (range: '7d' | '30d' | '90d') => void;
+  fetchHourOfWeek: (force?: boolean) => Promise<void>;
+
+  // Streak history (Phase 6 backlog) — last 84 days of streak length per
+  // /api/insights/streak-history. Cache-keyed by today's date so a new day
+  // refetches without forcing.
+  streakHistory: {
+    days: { date: string; streak: number; qualified: boolean }[];
+    peakValue: number;
+    peakDate: string | null;
+    today: string;
+  } | null;
+  streakHistoryFetchedFor: string | null;
+  fetchStreakHistory: (force?: boolean) => Promise<void>;
+
+  // Saved views — per-user named filter combos scoped to one view_type.
+  savedViews: SavedView[];
+  fetchSavedViews: () => Promise<void>;
+  saveView: (name: string, viewType: SavedViewType, filters: Filters) => Promise<SavedView | null>;
+  loadView: (id: string) => void;
+  renameView: (id: string, name: string) => Promise<void>;
+  deleteView: (id: string) => Promise<void>;
+
   // Insights page state. Payload cached per-range for 60s to keep the
   // range-toggle snappy. `selectedProjectId` / `selectedTagId` are client-only
   // drill-down picks; they reset when the payload changes.
@@ -233,7 +348,9 @@ interface Store {
   setInsightsSelectedTag: (id: string | null) => void;
 }
 
-export const useStore = create<Store>((set, get) => ({
+export const useStore = create<Store>()(
+  persist(
+    (set, get) => ({
   tasks: [],
   tags: [],
   categories: [],
@@ -241,6 +358,271 @@ export const useStore = create<Store>((set, get) => ({
   view: 'kanban',
   userId: null,
   loading: false,
+
+  // ---- Transient toast ----------------------------------------------------
+  toast: null,
+  showToast: (message) =>
+    set((s) => ({
+      toast: { message, id: (s.toast?.id ?? 0) + 1 },
+    })),
+  dismissToast: (id) =>
+    set((s) => {
+      // If an `id` is passed, only dismiss when it matches — that lets a
+      // setTimeout from an older toast no-op safely after a newer one took
+      // over the slot.
+      if (id != null && s.toast?.id !== id) return {};
+      return { toast: null };
+    }),
+
+  // ---- Quick-add command bar ----------------------------------------------
+  quickAddOpen: false,
+  openQuickAdd: () => set({ quickAddOpen: true }),
+  closeQuickAdd: () => set({ quickAddOpen: false }),
+
+  // ---- Calendar (Phase 3 step 10) -----------------------------------------
+  dailyTargets: null,
+  secondsByDay: {},
+  secondsByDayRange: null,
+  fetchDailyTargets: async () => {
+    const { userId } = get();
+    if (!userId) return;
+    const res = await fetch('/api/daily-targets', { credentials: 'include' });
+    if (!res.ok) {
+      console.error('[store.fetchDailyTargets]', await res.text());
+      return;
+    }
+    const json = (await res.json()) as { daily_targets: DailyTargets };
+    set({ dailyTargets: json.daily_targets });
+  },
+  updateDailyTargets: async (updates) => {
+    const prev = get().dailyTargets;
+    if (prev) {
+      // Optimistic — apply locally, then PUT and reconcile with server response.
+      set({ dailyTargets: { ...prev, ...updates } });
+    }
+    const res = await fetch('/api/daily-targets', {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    if (!res.ok) {
+      console.error('[store.updateDailyTargets]', await res.text());
+      if (prev) set({ dailyTargets: prev });
+      return;
+    }
+    const json = (await res.json()) as { daily_targets: DailyTargets };
+    set({ dailyTargets: json.daily_targets });
+  },
+  hourOfWeekRange: '30d',
+  hourOfWeekMatrix: null,
+  hourOfWeekFetchedFor: null,
+  setHourOfWeekRange: (range) => {
+    set({ hourOfWeekRange: range });
+    void get().fetchHourOfWeek();
+  },
+  fetchHourOfWeek: async (force) => {
+    const { userId, hourOfWeekRange, hourOfWeekFetchedFor } = get();
+    if (!userId) return;
+    if (!force && hourOfWeekFetchedFor === hourOfWeekRange) return;
+    const res = await fetch(
+      `/api/sessions/by-hour-of-week?range=${hourOfWeekRange}`,
+      { credentials: 'include' },
+    );
+    if (!res.ok) {
+      console.error('[store.fetchHourOfWeek]', await res.text());
+      return;
+    }
+    const json = (await res.json()) as {
+      seconds_by_day_hour: number[][];
+    };
+    set({
+      hourOfWeekMatrix: json.seconds_by_day_hour,
+      hourOfWeekFetchedFor: hourOfWeekRange,
+    });
+  },
+
+  streakHistory: null,
+  streakHistoryFetchedFor: null,
+  fetchStreakHistory: async (force) => {
+    const { userId, streakHistoryFetchedFor } = get();
+    if (!userId) return;
+    // Cache key is the user-tz "today" the server returned last time. We
+    // approximate it with the local-tz date string here; the server is the
+    // source of truth, so a stale local key just causes one extra fetch.
+    const localTodayKey = (() => {
+      const d = new Date();
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    })();
+    if (!force && streakHistoryFetchedFor === localTodayKey) return;
+    const res = await fetch('/api/insights/streak-history', {
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      console.error('[store.fetchStreakHistory]', await res.text());
+      return;
+    }
+    const json = (await res.json()) as {
+      days: { date: string; streak: number; qualified: boolean }[];
+      peak_value: number;
+      peak_date: string | null;
+      today: string;
+    };
+    set({
+      streakHistory: {
+        days: json.days,
+        peakValue: json.peak_value,
+        peakDate: json.peak_date,
+        today: json.today,
+      },
+      streakHistoryFetchedFor: json.today,
+    });
+  },
+
+  daySessions: null,
+  fetchDaySessions: async (date, force) => {
+    const { userId, daySessions } = get();
+    if (!userId) return;
+    if (!force && daySessions?.date === date) return;
+    const res = await fetch(
+      `/api/sessions/by-day-detailed?date=${encodeURIComponent(date)}`,
+      { credentials: 'include' },
+    );
+    if (!res.ok) {
+      console.error('[store.fetchDaySessions]', await res.text());
+      return;
+    }
+    const json = (await res.json()) as {
+      date: string;
+      sessions: {
+        id: string;
+        task_id: string | null;
+        subtask_id: string | null;
+        started_at: string;
+        ended_at: string | null;
+        duration_seconds: number | null;
+        mode: string | null;
+      }[];
+    };
+    set({ daySessions: { date: json.date, sessions: json.sessions } });
+  },
+
+  fetchSessionsByDay: async (from, to) => {
+    const { userId } = get();
+    if (!userId) return;
+    const res = await fetch(
+      `/api/sessions/by-day?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+      { credentials: 'include' },
+    );
+    if (!res.ok) {
+      console.error('[store.fetchSessionsByDay]', await res.text());
+      return;
+    }
+    const json = (await res.json()) as {
+      from: string;
+      to: string;
+      seconds_by_day: Record<string, number>;
+    };
+    set({
+      secondsByDay: json.seconds_by_day,
+      secondsByDayRange: { from: json.from, to: json.to },
+    });
+  },
+
+  // ---- Filter bar (Change #4) ---------------------------------------------
+  filters: { ...EMPTY_FILTERS },
+  setFilters: (f) => set({ filters: f }),
+  clearFilter: (dim, value) =>
+    set((s) => {
+      const arr = s.filters[dim] as string[];
+      const next = arr.filter((x) => x !== value);
+      return { filters: { ...s.filters, [dim]: next } };
+    }),
+  clearAllFilters: () => set({ filters: { ...EMPTY_FILTERS } }),
+
+  // ---- Saved views --------------------------------------------------------
+  savedViews: [],
+  fetchSavedViews: async () => {
+    const { userId } = get();
+    if (!userId) return;
+    const res = await fetch('/api/saved-views', { credentials: 'include' });
+    if (!res.ok) {
+      console.error('[store.fetchSavedViews]', await res.text());
+      return;
+    }
+    const json = (await res.json()) as { saved_views: SavedView[] };
+    set({ savedViews: json.saved_views });
+  },
+  saveView: async (name, viewType, filters) => {
+    const res = await fetch('/api/saved-views', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, view_type: viewType, filters }),
+    });
+    if (!res.ok) {
+      console.error('[store.saveView]', await res.text());
+      return null;
+    }
+    const json = (await res.json()) as { saved_view: SavedView };
+    set((s) => ({ savedViews: [...s.savedViews, json.saved_view] }));
+    return json.saved_view;
+  },
+  loadView: (id) => {
+    const view = get().savedViews.find((v) => v.id === id);
+    if (!view) return;
+    // saved_views.view_type maps to ViewMode. 'board' → 'kanban', 'list' →
+    // 'list', 'priority' → 'priority' (Phase 3 step 8). 'calendar' is still
+    // reserved for the Phase 3 calendar step; those views apply filters but
+    // don't switch view yet.
+    const mode: ViewMode | null =
+      view.view_type === 'board'
+        ? 'kanban'
+        : view.view_type === 'list'
+          ? 'list'
+          : view.view_type === 'priority'
+            ? 'priority'
+            : null;
+    set({
+      filters: {
+        project_ids: view.filters.project_ids ?? [],
+        category_ids: view.filters.category_ids ?? [],
+        tag_ids: view.filters.tag_ids ?? [],
+        priorities: view.filters.priorities ?? [],
+      },
+      ...(mode ? { view: mode } : {}),
+    });
+  },
+  renameView: async (id, name) => {
+    const res = await fetch(`/api/saved-views/${id}`, {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    if (!res.ok) {
+      console.error('[store.renameView]', await res.text());
+      return;
+    }
+    const json = (await res.json()) as { saved_view: SavedView };
+    set((s) => ({
+      savedViews: s.savedViews.map((v) => (v.id === id ? json.saved_view : v)),
+    }));
+  },
+  deleteView: async (id) => {
+    const res = await fetch(`/api/saved-views/${id}`, {
+      method: 'DELETE',
+      credentials: 'include',
+    });
+    if (!res.ok && res.status !== 204) {
+      console.error('[store.deleteView]', await res.text());
+      return;
+    }
+    set((s) => ({ savedViews: s.savedViews.filter((v) => v.id !== id) }));
+  },
 
   notifications: [],
   prefs: null,
@@ -265,6 +647,8 @@ export const useStore = create<Store>((set, get) => ({
       get().fetchRules(),
       get().fetchProfileV2(),
       get().fetchActiveSessions(),
+      get().fetchSavedViews(),
+      get().fetchDailyTargets(),
     ]);
     for (const r of results) {
       if (r.status === 'rejected') console.error('[store.fetchAll]', r.reason);
@@ -527,20 +911,31 @@ export const useStore = create<Store>((set, get) => ({
     const row = data as TrackedSession;
     set((s) => ({ activeSessions: [...s.activeSessions, row] }));
 
-    // Auto-promote todo → in_progress when work actively starts.
+    // Auto-promote todo → in_progress when work actively starts. The view
+    // (v_task_status) already sees this as in_progress because the open
+    // session promotes it; this block keeps legacy `tasks.status` in sync and
+    // also flips effective_status optimistically so the UI updates without a
+    // refetch round-trip. Mirrors mobile's branch in get-it-done-mobile/lib/store.ts.
     const parent = get().tasks.find((t) => t.id === taskId);
-    if (parent && parent.status === 'todo') {
+    if (parent && parent.effective_status === 'todo') {
       set((s) => ({
-        tasks: s.tasks.map((t) => (t.id === taskId ? { ...t, status: 'in_progress' } : t)),
+        tasks: s.tasks.map((t) =>
+          t.id === taskId
+            ? { ...t, status: 'in_progress', effective_status: 'in_progress' }
+            : t,
+        ),
       }));
       const { error: promoteErr } = await supabase()
         .from('tasks')
         .update({ status: 'in_progress' })
         .eq('id', taskId);
       if (promoteErr) {
-        // Roll back local status but keep the session running.
         set((s) => ({
-          tasks: s.tasks.map((t) => (t.id === taskId ? { ...t, status: 'todo' } : t)),
+          tasks: s.tasks.map((t) =>
+            t.id === taskId
+              ? { ...t, status: 'todo', effective_status: 'todo' }
+              : t,
+          ),
         }));
       }
     }
@@ -898,44 +1293,42 @@ export const useStore = create<Store>((set, get) => ({
   fetchTasks: async () => {
     const { userId } = get();
     if (!userId) return;
-    const { data, error } = await supabase()
-      .from('tasks')
-      .select(
-        `
-        id, user_id, title, description, status, priority, due_date,
-        total_time_seconds, estimated_seconds, sort_order, allow_alarms,
-        planned_for_date,
-        subtasks ( id, task_id, title, is_done, total_time_seconds, sort_order ),
-        task_tags ( tag_id ),
-        task_categories ( category_id ),
-        task_projects ( project_id ),
-        time_sessions ( id, task_id, subtask_id, started_at, duration_seconds, label )
-      `,
-      )
-      .eq('user_id', userId)
-      .order('sort_order', { ascending: true });
-    if (error) throw error;
-    const rows = (data ?? []) as unknown as TaskRow[];
-    const tasks = rows.map(rowToTask);
-
-    // Backfill: any todo task with at least one done subtask is actually in
-    // progress. Fixes tasks completed before the auto-promote rule existed.
-    const toPromote = tasks.filter(
-      (t) =>
-        t.status === 'todo' &&
-        t.subtasks.some((s) => s.is_done) &&
-        !t.subtasks.every((s) => s.is_done),
-    );
-    if (toPromote.length > 0) {
-      const ids = toPromote.map((t) => t.id);
-      for (const t of tasks) {
-        if (ids.includes(t.id)) t.status = 'in_progress';
-      }
-      void supabase()
+    // Two parallel queries: tasks (with embeds) and v_task_status (read-only
+    // derived view from migration 0023). Merged in JS by id. v_task_status is
+    // a view, so PostgREST can't embed it as a relationship without an FK
+    // hint that views don't support.
+    const [tasksRes, statusRes] = await Promise.all([
+      supabase()
         .from('tasks')
-        .update({ status: 'in_progress' })
-        .in('id', ids);
-    }
+        .select(
+          `
+          id, user_id, title, description, status, completed_at, priority, due_date,
+          total_time_seconds, estimated_seconds, sort_order, allow_alarms,
+          planned_for_date,
+          subtasks ( id, task_id, title, is_done, total_time_seconds, sort_order ),
+          task_tags ( tag_id ),
+          task_categories ( category_id ),
+          task_projects ( project_id ),
+          time_sessions ( id, task_id, subtask_id, started_at, duration_seconds, label )
+        `,
+        )
+        .eq('user_id', userId)
+        .order('sort_order', { ascending: true }),
+      supabase()
+        .from('v_task_status')
+        .select('id, effective_status')
+        .eq('user_id', userId),
+    ]);
+    if (tasksRes.error) throw tasksRes.error;
+    if (statusRes.error) throw statusRes.error;
+    const statusRows = (statusRes.data ?? []) as { id: string; effective_status: Status }[];
+    const statusMap = new Map<string, Status>(
+      statusRows.map((r) => [r.id, r.effective_status]),
+    );
+    const rows = (tasksRes.data ?? []) as unknown as TaskRow[];
+    const tasks = rows.map((row) =>
+      rowToTask(row, statusMap.get(row.id) ?? row.status),
+    );
 
     set({ tasks });
   },
@@ -981,6 +1374,7 @@ export const useStore = create<Store>((set, get) => ({
       ...rowToTask({
         ...task,
         description: task.description ?? null,
+        completed_at: task.completed_at ?? null,
         allow_alarms: task.allow_alarms ?? false,
         planned_for_date: task.planned_for_date ?? null,
         subtasks: [],
@@ -988,7 +1382,10 @@ export const useStore = create<Store>((set, get) => ({
         task_categories: [],
         task_projects: [],
         time_sessions: [],
-      }),
+      // A fresh task has no tracked_sessions and no completed_at, so
+      // v_task_status will derive 'todo'. Hardcode the local seed to match
+      // the spec invariant (no flicker through 'in_progress' or 'done').
+      }, 'todo'),
       tag_ids: input.tag_ids,
       category_ids: categoryIds,
       project_ids: projectIds,
@@ -1000,13 +1397,23 @@ export const useStore = create<Store>((set, get) => ({
   updateTask: async (id, updates) => {
     const prev = get().tasks;
     set((s) => ({
-      tasks: s.tasks.map((t) => (t.id === id ? { ...t, ...updates } : t)),
+      tasks: s.tasks.map((t) => {
+        if (t.id !== id) return t;
+        const merged = { ...t, ...updates };
+        // Re-derive effective_status locally to mirror v_task_status. The next
+        // fetchTasks reconfirms; this prevents flicker between click and refetch.
+        // Especially critical for Done-checkbox toggles where the user expects
+        // immediate visual feedback.
+        merged.effective_status = deriveEffectiveStatus(merged);
+        return merged;
+      }),
     }));
     const payload: Record<string, unknown> = {};
     if (updates.title !== undefined) payload.title = updates.title;
     if (updates.description !== undefined) payload.description = updates.description;
     if (updates.priority !== undefined) payload.priority = updates.priority;
     if (updates.status !== undefined) payload.status = updates.status;
+    if (updates.completed_at !== undefined) payload.completed_at = updates.completed_at;
     if (updates.due_date !== undefined) payload.due_date = updates.due_date;
     if (updates.estimated_seconds !== undefined)
       payload.estimated_seconds = updates.estimated_seconds;
@@ -1550,4 +1957,24 @@ export const useStore = create<Store>((set, get) => ({
 
   setInsightsSelectedProject: (id) => set({ insightsSelectedProjectId: id }),
   setInsightsSelectedTag: (id) => set({ insightsSelectedTagId: id }),
-}));
+    }),
+    {
+      // Persist only the filters slice. Userid isn't known at module-eval time,
+      // so we use a stable global key — mixing across accounts is rare on a
+      // single browser, and a stale filter just gets cleared with one click.
+      // Tags/categories/projects in stale filters silently no-op against the
+      // current user's data.
+      name: 'get-it-done:filters:v1',
+      storage: createJSONStorage(() => {
+        if (typeof window !== 'undefined') return window.localStorage;
+        // SSR / Node: a no-op storage so persist middleware doesn't crash.
+        return {
+          getItem: () => null,
+          setItem: () => {},
+          removeItem: () => {},
+        };
+      }),
+      partialize: (state) => ({ filters: state.filters }) as Partial<Store>,
+    },
+  ),
+);

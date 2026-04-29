@@ -164,7 +164,7 @@ export function EditTaskDrawer({ taskId, onClose }: Props) {
             <input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="w-full border-[1.5px] border-[#e5e7eb] rounded-lg px-3 py-2 text-[14px] outline-none focus:border-[#8b5cf6]"
+              className="w-full border-[1.5px] border-[#e5e7eb] rounded-lg px-3 py-2 text-[14px] outline-none focus:border-[#1a1a2e]"
             />
           </Field>
 
@@ -174,7 +174,7 @@ export function EditTaskDrawer({ taskId, onClose }: Props) {
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
               placeholder="Optional notes…"
-              className="w-full border-[1.5px] border-[#e5e7eb] rounded-lg px-3 py-2 text-[13px] outline-none focus:border-[#8b5cf6] resize-y"
+              className="w-full border-[1.5px] border-[#e5e7eb] rounded-lg px-3 py-2 text-[13px] outline-none focus:border-[#1a1a2e] resize-y"
             />
           </Field>
 
@@ -249,7 +249,7 @@ export function EditTaskDrawer({ taskId, onClose }: Props) {
               />
               <button
                 onClick={() => setPlannedForDate(todayISO())}
-                className="text-[11px] font-bold text-[#8b5cf6] bg-[rgba(139,92,246,0.08)] border-0 rounded-md px-2 py-1 cursor-pointer"
+                className="text-[11px] font-bold text-[#1a1a2e] bg-[rgba(0,0,0,0.08)] border-0 rounded-md px-2 py-1 cursor-pointer"
               >
                 Today
               </button>
@@ -288,7 +288,7 @@ export function EditTaskDrawer({ taskId, onClose }: Props) {
               type="checkbox"
               checked={allowAlarms}
               onChange={(e) => setAllowAlarms(e.target.checked)}
-              className="w-4 h-4 cursor-pointer accent-[#8b5cf6]"
+              className="w-4 h-4 cursor-pointer accent-[#1a1a2e]"
             />
             <div>
               <div className="text-[13px] font-bold text-[#1a1a2e]">
@@ -331,11 +331,11 @@ export function EditTaskDrawer({ taskId, onClose }: Props) {
                 onChange={(e) => setNewSub(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleAddSub()}
                 placeholder="Add subtask…"
-                className="flex-1 border-[1.5px] border-[#e5e7eb] rounded-lg px-3 py-[6px] text-[13px] outline-none focus:border-[#8b5cf6]"
+                className="flex-1 border-[1.5px] border-[#e5e7eb] rounded-lg px-3 py-[6px] text-[13px] outline-none focus:border-[#1a1a2e]"
               />
               <button
                 onClick={handleAddSub}
-                className="px-3 py-[6px] rounded-lg bg-[rgba(139,92,246,0.1)] text-[#8b5cf6] text-[12px] font-bold cursor-pointer border-0"
+                className="px-3 py-[6px] rounded-lg bg-[rgba(0,0,0,0.1)] text-[#1a1a2e] text-[12px] font-bold cursor-pointer border-0"
               >
                 + Add
               </button>
@@ -352,7 +352,7 @@ export function EditTaskDrawer({ taskId, onClose }: Props) {
           </button>
           <button
             onClick={handleSave}
-            className="px-4 py-2 rounded-lg bg-[#8b5cf6] text-white border-0 text-[13px] font-bold cursor-pointer"
+            className="px-4 py-2 rounded-lg bg-[#1a1a2e] text-white border-0 text-[13px] font-bold cursor-pointer"
           >
             Save
           </button>
@@ -431,7 +431,7 @@ function SortableSubtaskRow({
               setEditing(false);
             }
           }}
-          className="flex-1 border-0 border-b-[1.5px] border-[#8b5cf6] outline-none text-[13px] py-[2px] bg-transparent"
+          className="flex-1 border-0 border-b-[1.5px] border-[#1a1a2e] outline-none text-[13px] py-[2px] bg-transparent"
         />
       ) : (
         <span

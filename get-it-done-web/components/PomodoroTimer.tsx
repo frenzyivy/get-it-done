@@ -73,9 +73,9 @@ export function PomodoroTimer({ task, expanded, onToggle }: Props) {
       className="relative w-8 h-8 rounded-lg border-0 shrink-0 flex items-center justify-center cursor-pointer transition-all"
       style={{
         background: running
-          ? '#8b5cf6'
+          ? '#1a1a2e'
           : totalTime > 0
-            ? 'rgba(139,92,246,0.1)'
+            ? 'rgba(0,0,0,0.1)'
             : 'rgba(0,0,0,0.04)',
       }}
     >
@@ -87,7 +87,7 @@ export function PomodoroTimer({ task, expanded, onToggle }: Props) {
           height="16"
           viewBox="0 0 24 24"
           fill="none"
-          stroke={totalTime > 0 ? '#8b5cf6' : '#999'}
+          stroke={totalTime > 0 ? '#1a1a2e' : '#999'}
           strokeWidth="2.5"
           strokeLinecap="round"
           strokeLinejoin="round"
@@ -126,8 +126,8 @@ export function PomodoroTimer({ task, expanded, onToggle }: Props) {
 
   const panel = (
     <div
-      className="rounded-xl p-[14px] mt-2 border-[1.5px] border-[rgba(139,92,246,0.15)]"
-      style={{ background: 'linear-gradient(135deg, #f8f7ff, #f0f0ff)' }}
+      className="rounded-xl p-[14px] mt-2 border-[1.5px] border-[rgba(0,0,0,0.15)]"
+      style={{ background: '#f3f4f6' }}
       onClick={(e) => e.stopPropagation()}
     >
       <div className="mb-3">
@@ -140,9 +140,9 @@ export function PomodoroTimer({ task, expanded, onToggle }: Props) {
           disabled={running}
           className="w-full px-[10px] py-2 rounded-[10px] text-[13px] font-semibold outline-none"
           style={{
-            border: running ? '1.5px solid rgba(139,92,246,0.3)' : '1.5px solid #e5e7eb',
-            background: running ? 'rgba(139,92,246,0.05)' : '#fff',
-            color: running ? '#8b5cf6' : '#1a1a2e',
+            border: running ? '1.5px solid rgba(0,0,0,0.3)' : '1.5px solid #e5e7eb',
+            background: running ? 'rgba(0,0,0,0.05)' : '#fff',
+            color: running ? '#1a1a2e' : '#1a1a2e',
             cursor: running ? 'not-allowed' : 'pointer',
           }}
         >
@@ -160,22 +160,22 @@ export function PomodoroTimer({ task, expanded, onToggle }: Props) {
         <div
           className="text-[36px] font-extrabold tabular-nums tracking-[1px] transition-all"
           style={{
-            color: running ? '#8b5cf6' : '#1a1a2e',
-            textShadow: running ? '0 0 20px rgba(139,92,246,0.3)' : 'none',
+            color: running ? '#1a1a2e' : '#1a1a2e',
+            textShadow: running ? '0 0 20px rgba(0,0,0,0.3)' : 'none',
           }}
         >
           {fmt(elapsed)}
         </div>
       </div>
       {running && (
-        <div className="text-center text-xs text-[#8b5cf6] font-semibold mb-2">
+        <div className="text-center text-xs text-[#1a1a2e] font-semibold mb-2">
           ▸ {activeLabel}
         </div>
       )}
 
       <div className="flex gap-2 justify-center mb-3">
         {!running && elapsed === 0 && (
-          <Btn onClick={handleStart} bg="#8b5cf6">
+          <Btn onClick={handleStart} bg="#1a1a2e">
             ▶ Start
           </Btn>
         )}
@@ -191,7 +191,7 @@ export function PomodoroTimer({ task, expanded, onToggle }: Props) {
         )}
         {!running && elapsed > 0 && (
           <>
-            <Btn onClick={handleResume} bg="#8b5cf6">
+            <Btn onClick={handleResume} bg="#1a1a2e">
               ▶ Resume
             </Btn>
             <Btn onClick={handleStop} bg="#10b981">
@@ -204,9 +204,9 @@ export function PomodoroTimer({ task, expanded, onToggle }: Props) {
         )}
       </div>
 
-      <div className="flex gap-4 justify-center py-2 border-t border-[rgba(139,92,246,0.1)]">
+      <div className="flex gap-4 justify-center py-2 border-t border-[rgba(0,0,0,0.1)]">
         <div className="text-center">
-          <div className="text-[18px] font-extrabold text-[#8b5cf6]">
+          <div className="text-[18px] font-extrabold text-[#1a1a2e]">
             {fmtShort(totalTime)}
           </div>
           <div className="text-[10px] text-[#888] font-semibold uppercase tracking-[0.5px]">
@@ -255,7 +255,7 @@ export function PomodoroTimer({ task, expanded, onToggle }: Props) {
                         })}
                       </div>
                     </div>
-                    <span className="font-bold text-[#8b5cf6] whitespace-nowrap">
+                    <span className="font-bold text-[#1a1a2e] whitespace-nowrap">
                       {fmtShort(s.duration_seconds)}
                     </span>
                   </div>

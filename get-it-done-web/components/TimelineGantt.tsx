@@ -88,7 +88,7 @@ export function TimelineGantt({
         const task = tasks.find((t) => t.id === b.task_id);
         const color =
           (task?.tag_ids[0] && tags.find((x) => x.id === task.tag_ids[0])?.color) ||
-          '#8b5cf6';
+          '#1a1a2e';
         const start = new Date(b.start_at).getTime();
         return {
           id: `p-${b.id}`,
@@ -138,7 +138,7 @@ export function TimelineGantt({
           start + dur * 1000 > p.startMs,
       );
       let color: string;
-      if (isLive) color = '#8b5cf6';
+      if (isLive) color = '#1a1a2e';
       else if (matchedPlanned) color = '#10b981';
       else color = '#a855f7';
       blocks.push({
@@ -289,7 +289,7 @@ export function TimelineGantt({
           </div>
           <div className="flex gap-3 text-[10px] text-[#888]">
             <span className="flex items-center gap-1">
-              <span className="inline-block w-3 h-2 rounded-sm bg-[#8b5cf6] opacity-30" />
+              <span className="inline-block w-3 h-2 rounded-sm bg-[#1a1a2e] opacity-30" />
               Planned
             </span>
             <span className="flex items-center gap-1">

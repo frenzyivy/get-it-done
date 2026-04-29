@@ -24,7 +24,12 @@ export interface TaskType {
   user_id: string;
   title: string;
   description: string | null;
+  // Legacy column. Still written for backwards-compat with older mobile reads,
+  // but the UI reads `effective_status` (derived from v_task_status / sessions
+  // / completed_at — see Phase 1 step 3 in the spec).
   status: Status;
+  effective_status: Status;
+  completed_at: string | null;
   priority: Priority;
   due_date: string | null;
   total_time_seconds: number;
@@ -223,6 +228,19 @@ export interface PlannedBlock {
   duration_seconds: number;
   block_type: 'work' | 'break' | 'lunch' | 'meeting';
   notes: string | null;
+}
+
+// Calendar view (Phase 7 step C). Per-weekday hour goals from migration 0024.
+export interface DailyTargets {
+  user_id: string;
+  mon: number;
+  tue: number;
+  wed: number;
+  thu: number;
+  fri: number;
+  sat: number;
+  sun: number;
+  preset_name: 'balanced' | 'weekend-off' | 'hustle' | 'custom' | null;
 }
 
 // Insights — mirrors get-it-done-web/types/index.ts. Mobile adds 'today'.

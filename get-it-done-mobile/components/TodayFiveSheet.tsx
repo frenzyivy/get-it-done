@@ -63,13 +63,17 @@ function TodayFiveInner({ onClose }: { onClose: () => void }) {
   );
   const completed = planned
     .slice(0, DAILY_CAP)
-    .filter((t) => t.status === 'done').length;
+    .filter((t) => t.effective_status === 'done').length;
 
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const handleStatusToggle = async (t: TaskType) => {
-    const next: Status = t.status === 'done' ? 'in_progress' : 'done';
-    await updateTask(t.id, { status: next });
+    const isCurrentlyDone = t.effective_status === 'done';
+    const next: Status = isCurrentlyDone ? 'in_progress' : 'done';
+    await updateTask(t.id, {
+      status: next,
+      completed_at: isCurrentlyDone ? null : new Date().toISOString(),
+    });
   };
 
   const handleRemove = async (t: TaskType) => {
@@ -113,14 +117,14 @@ function TodayFiveInner({ onClose }: { onClose: () => void }) {
               width: 20,
               height: 20,
               borderRadius: 6,
-              borderWidth: item.status === 'done' ? 0 : 2,
+              borderWidth: item.effective_status === 'done' ? 0 : 2,
               borderColor: '#ccc',
-              backgroundColor: item.status === 'done' ? '#10b981' : 'transparent',
+              backgroundColor: item.effective_status === 'done' ? '#10b981' : 'transparent',
               alignItems: 'center',
               justifyContent: 'center',
             }}
           >
-            {item.status === 'done' && (
+            {item.effective_status === 'done' && (
               <Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>
                 ✓
               </Text>
@@ -130,9 +134,9 @@ function TodayFiveInner({ onClose }: { onClose: () => void }) {
             style={{
               flex: 1,
               fontSize: 13,
-              color: item.status === 'done' ? '#aaa' : inTopFive ? '#1a1a2e' : '#666',
+              color: item.effective_status === 'done' ? '#aaa' : inTopFive ? '#1a1a2e' : '#666',
               fontWeight: inTopFive ? '700' : '500',
-              textDecorationLine: item.status === 'done' ? 'line-through' : 'none',
+              textDecorationLine: item.effective_status === 'done' ? 'line-through' : 'none',
             }}
             numberOfLines={1}
           >
@@ -300,7 +304,7 @@ function TaskPicker({
         .filter(
           (t) =>
             t.planned_for_date !== excludeDate &&
-            t.status !== 'done' &&
+            t.effective_status !== 'done' &&
             t.title.toLowerCase().includes(query.toLowerCase()),
         )
         .slice()

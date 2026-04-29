@@ -72,7 +72,7 @@ export function TodayCard() {
 
   const completedToday = tasks.filter(
     (t) =>
-      t.status === 'done' &&
+      t.effective_status === 'done' &&
       isToday(t.sessions[t.sessions.length - 1]?.started_at),
   ).length;
 
@@ -82,7 +82,7 @@ export function TodayCard() {
     .reduce((sum, s) => sum + (s.duration_seconds ?? 0), 0);
 
   const estimateTotal = tasks
-    .filter((t) => isToday(t.due_date) && t.status !== 'done')
+    .filter((t) => isToday(t.due_date) && t.effective_status !== 'done')
     .reduce((sum, t) => sum + (t.estimated_seconds ?? 0), 0);
 
   const remaining = Math.max(0, estimateTotal - investedToday);

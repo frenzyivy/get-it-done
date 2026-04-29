@@ -44,9 +44,9 @@ export function KanbanColumn({ col, tasks }: Props) {
       ref={setNodeRef}
       className="rounded-2xl p-[14px] transition-colors"
       style={{
-        background: isOver ? 'rgba(139,92,246,0.06)' : 'rgba(0,0,0,0.02)',
+        background: isOver ? 'rgba(0,0,0,0.06)' : 'rgba(0,0,0,0.02)',
         border: isOver
-          ? '2px dashed rgba(139,92,246,0.3)'
+          ? '2px dashed rgba(0,0,0,0.3)'
           : '2px dashed transparent',
       }}
     >
@@ -74,7 +74,8 @@ export function KanbanColumn({ col, tasks }: Props) {
             No tasks yet
           </p>
         )}
-        <AddTaskForm defaultStatus={col.id} />
+        {/* Per spec: fresh tasks always start in 'todo' regardless of column. */}
+        <AddTaskForm />
       </div>
     </div>
   );

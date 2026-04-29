@@ -77,7 +77,7 @@ export function SubtaskItem({
         paddingVertical: 5,
         paddingLeft: isTrackingThis ? 7 : 0,
         borderLeftWidth: isTrackingThis ? 3 : 0,
-        borderLeftColor: '#8b5cf6',
+        borderLeftColor: '#1a1a2e',
         borderBottomWidth: 1,
         borderBottomColor: 'rgba(0,0,0,0.04)',
       }}
@@ -114,7 +114,7 @@ export function SubtaskItem({
             fontSize: 13,
             paddingVertical: 2,
             borderBottomWidth: 1.5,
-            borderBottomColor: '#8b5cf6',
+            borderBottomColor: '#1a1a2e',
           }}
         />
       ) : (
@@ -134,7 +134,7 @@ export function SubtaskItem({
       {isTrackingThis ? (
         <View
           style={{
-            backgroundColor: '#8b5cf6',
+            backgroundColor: '#1a1a2e',
             paddingHorizontal: 7,
             paddingVertical: 2,
             borderRadius: 5,
@@ -146,18 +146,16 @@ export function SubtaskItem({
         </View>
       ) : (
         subtask.total_time_seconds > 0 && (
-          <View
+          <Text
             style={{
-              backgroundColor: 'rgba(139,92,246,0.08)',
-              paddingHorizontal: 6,
-              paddingVertical: 1,
-              borderRadius: 5,
+              fontSize: 11,
+              fontWeight: '600',
+              color: '#666',
+              fontVariant: ['tabular-nums'],
             }}
           >
-            <Text style={{ fontSize: 10, fontWeight: '700', color: '#8b5cf6' }}>
-              🕐 {fmtShort(subtask.total_time_seconds)}
-            </Text>
-          </View>
+            {fmtShort(subtask.total_time_seconds)}
+          </Text>
         )
       )}
 
@@ -168,14 +166,14 @@ export function SubtaskItem({
           width: 28,
           height: 28,
           borderRadius: 14,
-          backgroundColor: isTrackingThis ? '#8b5cf6' : 'rgba(139,92,246,0.1)',
+          backgroundColor: isTrackingThis ? '#1a1a2e' : 'rgba(0,0,0,0.1)',
           alignItems: 'center',
           justifyContent: 'center',
         }}
       >
         <Text
           style={{
-            color: isTrackingThis ? '#fff' : '#8b5cf6',
+            color: isTrackingThis ? '#fff' : '#1a1a2e',
             fontSize: 12,
             fontWeight: '800',
           }}

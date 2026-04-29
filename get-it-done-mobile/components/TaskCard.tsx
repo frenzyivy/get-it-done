@@ -68,8 +68,15 @@ export function TaskCard({ task, compact = false }: Props) {
 
   // Feature 2c — always-visible task checkbox.
   const handleCheckbox = () => {
-    const next: Status = task.status === 'done' ? 'in_progress' : 'done';
-    void updateTask(task.id, { status: next });
+    const isCurrentlyDone = task.effective_status === 'done';
+    const next: Status = isCurrentlyDone ? 'in_progress' : 'done';
+    // Write both legacy `status` and `completed_at` so the UI flips coherently:
+    // `completed_at` is what v_task_status reads from; legacy `status` keeps
+    // older mobile reads (and any stragglers) consistent.
+    void updateTask(task.id, {
+      status: next,
+      completed_at: isCurrentlyDone ? null : new Date().toISOString(),
+    });
   };
 
   // "Today's 5" quick actions.
@@ -140,7 +147,7 @@ export function TaskCard({ task, compact = false }: Props) {
   };
 
   const progress = getProgress(task.subtasks);
-  const overdue = isOverdue(task.due_date, task.status);
+  const overdue = isOverdue(task.due_date, task.effective_status);
   const taskTags = task.tag_ids.map((id) => tags.find((t) => t.id === id));
   const taskCategories = task.category_ids
     .map((id) => categories.find((c) => c.id === id))
@@ -157,7 +164,7 @@ export function TaskCard({ task, compact = false }: Props) {
 
   const doneCount = task.subtasks.filter((s) => s.is_done).length;
   const incompleteSubsOnDone =
-    task.status === 'done' && task.subtasks.length > 0 && doneCount < task.subtasks.length;
+    task.effective_status === 'done' && task.subtasks.length > 0 && doneCount < task.subtasks.length;
 
   // Over-estimate visual states for the invested chip.
   let investedColor: string = '#888';
@@ -190,9 +197,9 @@ export function TaskCard({ task, compact = false }: Props) {
         shadowOffset: { width: 0, height: 2 },
         elevation: running || isTrackingThisCard ? 4 : 2,
         borderLeftWidth: isTrackingThisCard ? 3 : 0,
-        borderLeftColor: isTrackingThisCard ? '#8b5cf6' : 'transparent',
+        borderLeftColor: isTrackingThisCard ? '#1a1a2e' : 'transparent',
         borderWidth: running ? 2 : 0,
-        borderColor: running ? 'rgba(139,92,246,0.25)' : 'transparent',
+        borderColor: running ? 'rgba(0,0,0,0.25)' : 'transparent',
       }}
     >
       <View
@@ -211,15 +218,15 @@ export function TaskCard({ task, compact = false }: Props) {
             width: 22,
             height: 22,
             borderRadius: 6,
-            borderWidth: task.status === 'done' ? 0 : 2,
+            borderWidth: task.effective_status === 'done' ? 0 : 2,
             borderColor: '#ccc',
-            backgroundColor: task.status === 'done' ? '#10b981' : 'transparent',
+            backgroundColor: task.effective_status === 'done' ? '#10b981' : 'transparent',
             alignItems: 'center',
             justifyContent: 'center',
             marginTop: 1,
           }}
         >
-          {task.status === 'done' && (
+          {task.effective_status === 'done' && (
             <Text style={{ color: '#fff', fontSize: 13, fontWeight: '700' }}>✓</Text>
           )}
         </Pressable>
@@ -253,10 +260,10 @@ export function TaskCard({ task, compact = false }: Props) {
               style={{
                 fontWeight: '700',
                 fontSize: compact ? 14 : 15,
-                color: task.status === 'done' ? '#888' : '#1a1a2e',
+                color: task.effective_status === 'done' ? '#888' : '#1a1a2e',
                 lineHeight: 19,
                 flexShrink: 1,
-                textDecorationLine: task.status === 'done' ? 'line-through' : 'none',
+                textDecorationLine: task.effective_status === 'done' ? 'line-through' : 'none',
               }}
             >
               {task.title}
@@ -275,17 +282,58 @@ export function TaskCard({ task, compact = false }: Props) {
                 </Text>
               </View>
             )}
-            {/* Feature 2b — invested chip */}
+            {/* Feature 2b — invested chip with two-line cell (matches web) */}
             <View
               style={{
-                backgroundColor: investedBg,
-                paddingHorizontal: 7,
-                paddingVertical: 1,
-                borderRadius: 6,
+                alignItems: 'flex-end',
               }}
             >
-              <Text style={{ fontSize: 11, fontWeight: '700', color: investedColor }}>
-                ⏱ {fmtShort(invested)}
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 4,
+                  backgroundColor:
+                    invested > 0 && investedBg !== 'rgba(0,0,0,0.04)'
+                      ? investedBg
+                      : 'transparent',
+                  paddingHorizontal:
+                    invested > 0 && investedBg !== 'rgba(0,0,0,0.04)' ? 6 : 0,
+                  paddingVertical: 1,
+                  borderRadius: 4,
+                }}
+              >
+                {isTrackingThisCard && (
+                  <View
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: 3,
+                      backgroundColor: '#1a1a2e',
+                    }}
+                  />
+                )}
+                <Text
+                  style={{
+                    fontSize: 13,
+                    fontWeight: '800',
+                    color: invested > 0 ? investedColor : '#9ca3af',
+                    fontVariant: ['tabular-nums'],
+                  }}
+                >
+                  {invested > 0 ? fmtShort(invested) : '0s'}
+                </Text>
+              </View>
+              <Text
+                style={{
+                  fontSize: 8,
+                  fontWeight: '700',
+                  color: '#9ca3af',
+                  letterSpacing: 1,
+                  marginTop: 1,
+                }}
+              >
+                {invested > 0 ? 'TOTAL TRACKED' : 'NEVER STARTED'}
               </Text>
             </View>
             {task.estimated_seconds && task.estimated_seconds > 0 && (

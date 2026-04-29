@@ -10,6 +10,8 @@ export interface UIContextValue {
   openFocusLockPicker: (taskId: string, subtaskId?: string | null) => void;
   // Recurring templates manager — opened from Settings.
   openRecurringTemplates: () => void;
+  openNotifications: () => void;
+  openOverflowMenu: () => void;
 }
 
 const UIContext = createContext<UIContextValue | null>(null);

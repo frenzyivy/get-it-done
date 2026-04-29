@@ -18,7 +18,7 @@ export function DailyGoalBar() {
     .slice()
     .sort((a, b) => a.sort_order - b.sort_order);
   const todaysFive = plannedForToday.slice(0, DAILY_CAP);
-  const completedToday = todaysFive.filter((t) => t.status === 'done').length;
+  const completedToday = todaysFive.filter((t) => t.effective_status === 'done').length;
 
   const streak = profile?.current_streak ?? 0;
 

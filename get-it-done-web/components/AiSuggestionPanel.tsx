@@ -80,9 +80,9 @@ export function AiSuggestionPanel({
   );
 
   return (
-    <div className="mt-3 rounded-xl border border-dashed border-[#c4b5fd] bg-[#faf5ff] p-3">
+    <div className="mt-3 rounded-xl border border-dashed border-[#e5e7eb] bg-[#f3f4f6] p-3">
       <div className="flex items-center justify-between">
-        <span className="text-[12px] font-semibold text-[#7c3aed]">✨ AI assist</span>
+        <span className="text-[12px] font-semibold text-[#1a1a2e]">✨ AI assist</span>
         <span className="text-[11px] text-[#9ca3af]">Suggestions are always optional</span>
       </div>
 
@@ -134,7 +134,7 @@ export function AiSuggestionPanel({
                 onAcceptSubtasks(subtasks.map((s) => s.title));
                 setSubtasks(null);
               }}
-              className="rounded-lg bg-[#8b5cf6] px-3 py-1 text-[12px] font-semibold text-white"
+              className="rounded-lg bg-[#1a1a2e] px-3 py-1 text-[12px] font-semibold text-white"
             >
               Add all
             </button>
@@ -177,7 +177,7 @@ export function AiSuggestionPanel({
                     onAcceptTags([s.tag_id]);
                     setTagSuggestions((prev) => prev?.filter((x) => x.tag_id !== s.tag_id) ?? null);
                   }}
-                  className="rounded-full border border-[#c4b5fd] bg-white px-3 py-1 text-[12px] text-[#7c3aed]"
+                  className="rounded-full border border-[#e5e7eb] bg-white px-3 py-1 text-[12px] text-[#1a1a2e]"
                 >
                   + {s.name}
                   <span className="ml-1 text-[10px] text-[#9ca3af]">
@@ -207,7 +207,7 @@ export function AiSuggestionPanel({
                 onAcceptEstimate(estimate.seconds);
                 setEstimate(null);
               }}
-              className="rounded-lg bg-[#8b5cf6] px-3 py-1 text-[12px] font-semibold text-white"
+              className="rounded-lg bg-[#1a1a2e] px-3 py-1 text-[12px] font-semibold text-white"
             >
               Use this estimate
             </button>
@@ -241,9 +241,9 @@ function AiButton({
     <button
       onClick={onClick}
       disabled={disabled}
-      className="rounded-lg bg-white px-3 py-1 text-[12px] font-semibold text-[#7c3aed] disabled:opacity-50"
+      className="rounded-lg bg-white px-3 py-1 text-[12px] font-semibold text-[#1a1a2e] disabled:opacity-50"
       style={{
-        border: `1px ${dashed ? 'dashed' : 'solid'} #c4b5fd`,
+        border: `1px ${dashed ? 'dashed' : 'solid'} #e5e7eb`,
       }}
     >
       {loading ? '…thinking' : label}
@@ -311,7 +311,7 @@ function LabelSuggestionBlock({
                 onAcceptCategories([c.id]);
               }}
               className="inline-flex items-center gap-[5px] rounded-md px-[9px] py-[3px] text-[11px] font-bold"
-              style={{ background: '#faf5ff', color: c.color, border: '1px dashed #c4b5fd' }}
+              style={{ background: '#f3f4f6', color: c.color, border: '1px dashed #e5e7eb' }}
             >
               <span
                 className="w-[6px] h-[6px] rounded-full"
@@ -331,7 +331,7 @@ function LabelSuggestionBlock({
                 onAcceptProjects([p.id]);
               }}
               className="rounded-md px-[9px] py-[3px] text-[11px] font-semibold"
-              style={{ background: '#faf5ff', color: p.color, border: '1px dashed #c4b5fd' }}
+              style={{ background: '#f3f4f6', color: p.color, border: '1px dashed #e5e7eb' }}
             >
               + {p.name}
             </button>
@@ -349,7 +349,7 @@ function LabelSuggestionBlock({
             }
             onDismiss();
           }}
-          className="rounded-lg bg-[#8b5cf6] px-3 py-1 text-[12px] font-semibold text-white"
+          className="rounded-lg bg-[#1a1a2e] px-3 py-1 text-[12px] font-semibold text-white"
         >
           Add all
         </button>

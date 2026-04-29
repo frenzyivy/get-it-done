@@ -24,7 +24,16 @@ export interface TaskType {
   user_id: string;
   title: string;
   description: string | null;
+  /**
+   * @deprecated Read `effective_status` instead. The legacy `status` column is
+   * still writable so mobile (Phase 6 migration) keeps working, but the
+   * redesigned UI derives display from `v_task_status` via `effective_status`.
+   */
   status: Status;
+  /** Derived from `v_task_status` (DB view). The source of truth for display. */
+  effective_status: Status;
+  /** When the user marked this Done. NULL = not done. The Done checkbox writes this; v_task_status reads it. */
+  completed_at: string | null;
   priority: Priority;
   due_date: string | null;
   total_time_seconds: number;
@@ -53,7 +62,12 @@ export interface CategoryType {
   color: string;
 }
 
-export type ProjectStatus = 'active' | 'paused' | 'archived';
+// 'paused' is a legacy state from migration 0019. The redesign uses the
+// 4-state lifecycle (active | completed | archived). 'paused' stays valid in
+// the type so existing rows still satisfy the union, but the manage-projects
+// dropdown hides it as an option for new user actions. Treat 'paused' the
+// same as 'completed' / 'archived' for "not active" filtering and faded UI.
+export type ProjectStatus = 'active' | 'paused' | 'completed' | 'archived';
 
 export interface ProjectType {
   id: string;
@@ -62,7 +76,58 @@ export interface ProjectType {
   status: ProjectStatus;
 }
 
-export type ViewMode = 'list' | 'kanban' | 'schedule' | 'timeline';
+export type ViewMode =
+  | 'list'
+  | 'kanban'
+  | 'schedule'
+  | 'timeline'
+  | 'priority'
+  | 'calendar';
+
+// Calendar view (Phase 3 step 10) — per-weekday hour goals.
+// Mirrors the daily_targets table from migration 0024. The DB enum allows
+// 'balanced' | 'weekend-off' | 'hustle' | 'custom'; the spec's UI labels are
+// "Balanced" / "Weekdays only" / "Hustle 7 days" / "Custom".
+export type CalendarPreset = 'balanced' | 'weekend-off' | 'hustle' | 'custom';
+
+export interface DailyTargets {
+  user_id: string;
+  mon: number;
+  tue: number;
+  wed: number;
+  thu: number;
+  fri: number;
+  sat: number;
+  sun: number;
+  preset_name: CalendarPreset | null;
+}
+
+// Filter dimensions for the Board / List filter bar (Change #4).
+// Empty arrays mean "no constraint" for that dimension. Across dimensions:
+// AND. Within a dimension: OR.
+export interface Filters {
+  project_ids: string[];
+  category_ids: string[];
+  tag_ids: string[];
+  priorities: Priority[];
+}
+
+// saved_views.view_type — DB CHECK constraint allows these four values.
+// 'board' covers BoardView, 'list' covers ListView. 'priority' and 'calendar'
+// are reserved for Phase 3 views and accepted by the API but not yet wired
+// in the UI.
+export type SavedViewType = 'board' | 'list' | 'priority' | 'calendar';
+
+export interface SavedView {
+  id: string;
+  name: string;
+  view_type: SavedViewType;
+  filters: Filters;
+  is_pinned: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
 
 export interface NotificationType {
   id: string;
@@ -233,7 +298,7 @@ export interface InsightsBucket {
 }
 
 export interface InsightsProjectBucket extends InsightsBucket {
-  status: 'active' | 'paused' | 'archived';
+  status: ProjectStatus;
   task_count: number;
 }
 

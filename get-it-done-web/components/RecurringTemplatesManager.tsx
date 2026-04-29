@@ -121,7 +121,7 @@ export function RecurringTemplatesManager() {
         </div>
         <button
           onClick={openNew}
-          className="shrink-0 px-3 py-[6px] rounded-lg bg-[#8b5cf6] text-white text-xs font-bold hover:bg-[#7c3aed]"
+          className="shrink-0 px-3 py-[6px] rounded-lg bg-[#1a1a2e] text-white text-xs font-bold hover:bg-[#1a1a2e]"
         >
           + New
         </button>
@@ -156,7 +156,7 @@ export function RecurringTemplatesManager() {
                 <button
                   onClick={() => toggleRecurringTemplate(t.id, !t.is_enabled)}
                   className="relative w-11 h-6 rounded-full transition-colors cursor-pointer"
-                  style={{ backgroundColor: t.is_enabled ? '#8b5cf6' : '#d1d5db' }}
+                  style={{ backgroundColor: t.is_enabled ? '#1a1a2e' : '#d1d5db' }}
                   aria-pressed={t.is_enabled}
                   aria-label={t.is_enabled ? 'Pause template' : 'Enable template'}
                 >
@@ -167,7 +167,7 @@ export function RecurringTemplatesManager() {
                 </button>
                 <button
                   onClick={() => openEdit(t)}
-                  className="text-[12px] font-semibold text-[#7c3aed] hover:underline"
+                  className="text-[12px] font-semibold text-[#1a1a2e] hover:underline"
                 >
                   Edit
                 </button>
@@ -230,9 +230,9 @@ export function RecurringTemplatesManager() {
                       }
                       className="px-3 py-[6px] rounded-lg text-xs font-bold transition-colors border-[1.5px]"
                       style={{
-                        borderColor: active ? '#8b5cf6' : '#e5e7eb',
-                        background: active ? '#F5F2FF' : '#fff',
-                        color: active ? '#8b5cf6' : '#333',
+                        borderColor: active ? '#1a1a2e' : '#e5e7eb',
+                        background: active ? '#f3f4f6' : '#fff',
+                        color: active ? '#1a1a2e' : '#333',
                       }}
                     >
                       {f.label}
@@ -258,9 +258,9 @@ export function RecurringTemplatesManager() {
                         }
                         className="w-10 h-9 rounded-lg text-xs font-bold border-[1.5px]"
                         style={{
-                          borderColor: active ? '#8b5cf6' : '#e5e7eb',
-                          background: active ? '#F5F2FF' : '#fff',
-                          color: active ? '#8b5cf6' : '#333',
+                          borderColor: active ? '#1a1a2e' : '#e5e7eb',
+                          background: active ? '#f3f4f6' : '#fff',
+                          color: active ? '#1a1a2e' : '#333',
                         }}
                       >
                         {label}
@@ -329,9 +329,9 @@ export function RecurringTemplatesManager() {
                       }
                       className="px-3 py-[6px] rounded-lg text-xs font-bold transition-colors border-[1.5px] capitalize"
                       style={{
-                        borderColor: active ? '#8b5cf6' : '#e5e7eb',
-                        background: active ? '#F5F2FF' : '#fff',
-                        color: active ? '#8b5cf6' : '#333',
+                        borderColor: active ? '#1a1a2e' : '#e5e7eb',
+                        background: active ? '#f3f4f6' : '#fff',
+                        color: active ? '#1a1a2e' : '#333',
                       }}
                     >
                       {p}
@@ -401,7 +401,7 @@ export function RecurringTemplatesManager() {
               <button
                 onClick={save}
                 disabled={!editing.draft.title.trim()}
-                className="px-4 py-2 rounded-lg bg-[#8b5cf6] text-white text-sm font-bold hover:bg-[#7c3aed] disabled:opacity-50"
+                className="px-4 py-2 rounded-lg bg-[#1a1a2e] text-white text-sm font-bold hover:bg-[#1a1a2e] disabled:opacity-50"
               >
                 {editing.mode === 'new' ? 'Create' : 'Save'}
               </button>

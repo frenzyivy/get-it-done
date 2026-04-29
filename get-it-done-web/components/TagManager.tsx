@@ -25,7 +25,7 @@ export function TagManager() {
         onClick={() => setOpen((v) => !v)}
         className="px-3 py-[5px] rounded-lg border-[1.5px] border-[#e5e7eb] text-xs font-bold cursor-pointer transition-all"
         style={{
-          background: open ? '#8b5cf6' : '#fff',
+          background: open ? '#1a1a2e' : '#fff',
           color: open ? '#fff' : '#666',
         }}
       >
@@ -62,7 +62,7 @@ export function TagManager() {
             {newName.trim() && (
               <button
                 onClick={create}
-                className="bg-[#8b5cf6] text-white border-0 rounded-lg px-[10px] py-[5px] text-[11px] font-bold cursor-pointer"
+                className="bg-[#1a1a2e] text-white border-0 rounded-lg px-[10px] py-[5px] text-[11px] font-bold cursor-pointer"
               >
                 +
               </button>

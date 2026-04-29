@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useStore } from '@/lib/store';
 import { TAG_COLORS } from '@/lib/constants';
+import { useDismissOnOutside } from '@/lib/hooks/useDismissOnOutside';
 import type { CategoryType } from '@/types';
 
 interface Props {
@@ -14,6 +15,8 @@ interface Props {
 // so the modal doesn't mix patterns.
 export function CategoryPicker({ selectedIds, onChange }: Props) {
   const [show, setShow] = useState(false);
+  const close = useCallback(() => setShow(false), []);
+  const rootRef = useDismissOnOutside<HTMLDivElement>(show, close);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
   const [newColor, setNewColor] = useState<string>(TAG_COLORS[0]);
@@ -45,7 +48,7 @@ export function CategoryPicker({ selectedIds, onChange }: Props) {
   };
 
   return (
-    <div className="relative">
+    <div ref={rootRef} className="relative">
       <button
         type="button"
         onClick={() => setShow((v) => !v)}
@@ -140,7 +143,7 @@ export function CategoryPicker({ selectedIds, onChange }: Props) {
                     type="button"
                     onClick={create}
                     disabled={!newName.trim() || busy}
-                    className="text-[11px] font-bold text-white bg-[#8b5cf6] border-0 px-2 py-[3px] rounded-md cursor-pointer disabled:opacity-50"
+                    className="text-[11px] font-bold text-white bg-[#1a1a2e] border-0 px-2 py-[3px] rounded-md cursor-pointer disabled:opacity-50"
                   >
                     {busy ? '…' : 'Create'}
                   </button>
@@ -150,18 +153,14 @@ export function CategoryPicker({ selectedIds, onChange }: Props) {
               <button
                 type="button"
                 onClick={() => setCreating(true)}
-                className="w-full text-left px-2 py-1 border-0 bg-transparent text-xs text-[#8b5cf6] font-bold cursor-pointer"
+                className="w-full text-left px-2 py-1 border-0 bg-transparent text-xs text-[#1a1a2e] font-bold cursor-pointer"
               >
                 + Create new category
               </button>
             )}
-            <button
-              type="button"
-              onClick={() => setShow(false)}
-              className="w-full py-1 border-0 bg-transparent text-xs text-[#6b7280] cursor-pointer"
-            >
-              Done
-            </button>
+            <div className="text-[10px] font-mono text-[#9ca3af] text-center pt-1 lowercase tracking-wider">
+              click outside or press esc to close
+            </div>
           </div>
         </div>
       )}

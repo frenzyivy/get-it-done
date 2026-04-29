@@ -1,8 +1,9 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useStore } from '@/lib/store';
 import { TAG_COLORS } from '@/lib/constants';
+import { useDismissOnOutside } from '@/lib/hooks/useDismissOnOutside';
 import type { ProjectType } from '@/types';
 
 interface Props {
@@ -10,12 +11,18 @@ interface Props {
   onChange: (ids: string[]) => void;
 }
 
-// Multi-select + search. Active projects only by default; "Show archived" reveals
-// paused/archived. Inline "+ Create new project" creates an active project and
-// preselects it.
+// Multi-select + search. Active projects only by default; per-bucket toggles
+// reveal completed and archived. 'paused' is a legacy state from migration
+// 0019 — for filtering we treat it as active (it's pre-redesign data the user
+// never explicitly chose to hide), so paused rows always show until they're
+// migrated to one of the 4 spec states.
+// Inline "+ Create new project" creates an active project and preselects it.
 export function ProjectPicker({ selectedIds, onChange }: Props) {
   const [show, setShow] = useState(false);
+  const close = useCallback(() => setShow(false), []);
+  const rootRef = useDismissOnOutside<HTMLDivElement>(show, close);
   const [search, setSearch] = useState('');
+  const [showCompleted, setShowCompleted] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
@@ -24,12 +31,27 @@ export function ProjectPicker({ selectedIds, onChange }: Props) {
   const projects = useStore((s) => s.projects);
   const addProject = useStore((s) => s.addProject);
 
+  // Per-bucket counts for the toggle labels.
+  const completedCount = useMemo(
+    () => projects.filter((p) => p.status === 'completed').length,
+    [projects],
+  );
+  const archivedCount = useMemo(
+    () => projects.filter((p) => p.status === 'archived').length,
+    [projects],
+  );
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return projects
-      .filter((p) => (showArchived ? true : p.status !== 'archived'))
+      .filter((p) => {
+        if (p.status === 'completed') return showCompleted;
+        if (p.status === 'archived') return showArchived;
+        // 'active' and legacy 'paused' are always visible by default.
+        return true;
+      })
       .filter((p) => (q ? p.name.toLowerCase().includes(q) : true));
-  }, [projects, search, showArchived]);
+  }, [projects, search, showCompleted, showArchived]);
 
   const toggle = (id: string) =>
     onChange(
@@ -55,7 +77,7 @@ export function ProjectPicker({ selectedIds, onChange }: Props) {
   };
 
   return (
-    <div className="relative">
+    <div ref={rootRef} className="relative">
       <button
         type="button"
         onClick={() => setShow((v) => !v)}
@@ -112,9 +134,17 @@ export function ProjectPicker({ selectedIds, onChange }: Props) {
                   className="w-2 h-2 rounded-full shrink-0"
                   style={{ background: p.color }}
                 />
-                <span className="flex-1">{p.name}</span>
-                {p.status !== 'active' && (
-                  <span className="text-[10px] uppercase tracking-wider text-[#9ca3af]">
+                <span
+                  className={`flex-1 ${
+                    p.status === 'completed' || p.status === 'archived'
+                      ? 'italic text-[#9ca3af]'
+                      : ''
+                  }`}
+                >
+                  {p.name}
+                </span>
+                {(p.status === 'completed' || p.status === 'archived') && (
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-[#9ca3af] bg-[#f3f4f6] border border-[#e5e7eb] rounded px-[4px] py-[1px] font-mono">
                     {p.status}
                   </span>
                 )}
@@ -125,11 +155,26 @@ export function ProjectPicker({ selectedIds, onChange }: Props) {
             <label className="flex items-center gap-2 px-2 py-1 cursor-pointer text-[11px] text-[#6b7280]">
               <input
                 type="checkbox"
+                checked={showCompleted}
+                onChange={(e) => setShowCompleted(e.target.checked)}
+                className="cursor-pointer accent-[#1a1a2e]"
+              />
+              Show completed{' '}
+              <span className="ml-auto text-[10px] text-[#9ca3af] font-mono">
+                {completedCount}
+              </span>
+            </label>
+            <label className="flex items-center gap-2 px-2 py-1 cursor-pointer text-[11px] text-[#6b7280]">
+              <input
+                type="checkbox"
                 checked={showArchived}
                 onChange={(e) => setShowArchived(e.target.checked)}
-                className="cursor-pointer accent-[#8b5cf6]"
+                className="cursor-pointer accent-[#1a1a2e]"
               />
-              Show archived
+              Show archived{' '}
+              <span className="ml-auto text-[10px] text-[#9ca3af] font-mono">
+                {archivedCount}
+              </span>
             </label>
             {creating ? (
               <div className="flex flex-col gap-1 p-1">
@@ -172,7 +217,7 @@ export function ProjectPicker({ selectedIds, onChange }: Props) {
                     type="button"
                     onClick={create}
                     disabled={!newName.trim() || busy}
-                    className="text-[11px] font-bold text-white bg-[#8b5cf6] border-0 px-2 py-[3px] rounded-md cursor-pointer disabled:opacity-50"
+                    className="text-[11px] font-bold text-white bg-[#1a1a2e] border-0 px-2 py-[3px] rounded-md cursor-pointer disabled:opacity-50"
                   >
                     {busy ? '…' : 'Create'}
                   </button>
@@ -182,18 +227,14 @@ export function ProjectPicker({ selectedIds, onChange }: Props) {
               <button
                 type="button"
                 onClick={() => setCreating(true)}
-                className="w-full text-left px-2 py-1 border-0 bg-transparent text-xs text-[#8b5cf6] font-bold cursor-pointer"
+                className="w-full text-left px-2 py-1 border-0 bg-transparent text-xs text-[#1a1a2e] font-bold cursor-pointer"
               >
                 + Create new project
               </button>
             )}
-            <button
-              type="button"
-              onClick={() => setShow(false)}
-              className="w-full py-1 border-0 bg-transparent text-xs text-[#6b7280] cursor-pointer"
-            >
-              Done
-            </button>
+            <div className="text-[10px] font-mono text-[#9ca3af] text-center pt-1 lowercase tracking-wider">
+              click outside or press esc to close
+            </div>
           </div>
         </div>
       )}

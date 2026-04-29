@@ -11,6 +11,13 @@ import DateTimePicker, {
   type DateTimePickerEvent,
 } from '@react-native-community/datetimepicker';
 import { useTheme } from 'react-native-paper';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { useStore } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 import { type as M3Type } from '@/lib/theme';
@@ -51,12 +58,16 @@ function tagHuePair(seed: string | undefined, dark: boolean, fallback: string) {
 export function ScheduleView() {
   const theme = useTheme();
   const c = theme.colors;
-  const success = theme.dark ? '#6FE39B' : '#0F7A4B';
+  // On-plan tracked blocks render in ink black (light mode) per spec § Design
+  // system — strict B&W chrome. Dark mode keeps the lime "Momentum" color so
+  // the M3 dark prototype stays coherent (matches NowTrackingBar redesign).
+  const success = theme.dark ? '#E4FF3A' : '#1a1a2e';
 
   const tasks = useStore((s) => s.tasks);
   const plannedBlocks = useStore((s) => s.plannedBlocks);
   const fetchPlannedBlocks = useStore((s) => s.fetchPlannedBlocks);
   const addPlannedBlock = useStore((s) => s.addPlannedBlock);
+  const updatePlannedBlock = useStore((s) => s.updatePlannedBlock);
   const deletePlannedBlock = useStore((s) => s.deletePlannedBlock);
   const activeSessions = useStore((s) => s.activeSessions);
   const fetchActiveSessions = useStore((s) => s.fetchActiveSessions);
@@ -340,49 +351,43 @@ export function ScheduleView() {
               theme.dark ? c.elevation.level3 : c.elevation.level2,
             );
             return (
-              <Pressable
+              <DraggablePlannedBlock
                 key={p.id}
+                top={top}
+                heightPx={h}
+                fill={fill}
+                border={border}
+                title={p.task?.title ?? 'Untitled'}
+                fgVariant={c.onSurfaceVariant}
+                fg={c.onSurface}
                 onLongPress={() =>
                   handleDeletePlan(
                     plannedBlocks.find((b) => b.id === p.id)!,
                     p.task?.title ?? 'Planned block',
                   )
                 }
-                style={{
-                  position: 'absolute',
-                  left: RAIL_W,
-                  top,
-                  width: '46%',
-                  height: h,
-                  borderRadius: 10,
-                  borderWidth: 1,
-                  borderColor: border,
-                  backgroundColor: fill,
-                  paddingHorizontal: 10,
-                  paddingVertical: 6,
-                  overflow: 'hidden',
+                onCommitDrag={(deltaPx) => {
+                  // Snap to nearest 15 min. HOUR_H px = 1 hour = 60 min.
+                  const deltaMinutes = (deltaPx / HOUR_H) * 60;
+                  const snapped = Math.round(deltaMinutes / 15) * 15;
+                  if (snapped === 0) return;
+                  // Clamp the new start to stay within visible day range.
+                  const block = plannedBlocks.find((b) => b.id === p.id);
+                  if (!block) return;
+                  const oldStart = new Date(block.start_at).getTime();
+                  const newStartMs = oldStart + snapped * 60 * 1000;
+                  const newStart = new Date(newStartMs);
+                  // Don't allow dragging out of the [START_HOUR, END_HOUR) window.
+                  const newStartHour =
+                    (newStartMs - dayStart.getTime()) / 3_600_000;
+                  if (newStartHour < START_HOUR) return;
+                  const blockHours = block.duration_seconds / 3600;
+                  if (newStartHour + blockHours > END_HOUR + 1) return;
+                  void updatePlannedBlock(p.id, {
+                    start_at: newStart.toISOString(),
+                  });
                 }}
-              >
-                <Text
-                  style={{
-                    ...M3Type.labelSmall,
-                    color: c.onSurfaceVariant,
-                    textTransform: 'uppercase',
-                  }}
-                >
-                  Plan
-                </Text>
-                <Text
-                  numberOfLines={2}
-                  style={{
-                    ...M3Type.bodyMedium,
-                    color: c.onSurface,
-                    marginTop: 2,
-                  }}
-                >
-                  {p.task?.title ?? 'Untitled'}
-                </Text>
-              </Pressable>
+              />
             );
           })}
 
@@ -392,7 +397,16 @@ export function ScheduleView() {
             const h = Math.max(8, (a.endHour - a.startHour) * HOUR_H - 2);
             const onPlan = isOnPlan(a);
             const bg = onPlan ? success : c.tertiary;
-            const fg = onPlan || theme.dark ? '#FFFFFF' : c.onTertiary;
+            // On-plan in light mode: ink-black bg → white fg.
+            // On-plan in dark mode:  lime bg → near-black fg.
+            // Off-plan: M3 c.onTertiary; falls back to white in dark mode.
+            const fg = onPlan
+              ? theme.dark
+                ? '#0C0B0A'
+                : '#FFFFFF'
+              : theme.dark
+                ? '#FFFFFF'
+                : c.onTertiary;
             const short = h < 22;
             return (
               <View
@@ -462,7 +476,7 @@ export function ScheduleView() {
             );
           })}
 
-          {/* Live block — primary fill, from live start to now */}
+          {/* Live block — ink-black fill (light) / lime (dark) per spec */}
           {liveStartHour !== null && liveTask && nowHour >= liveStartHour && (
             <View
               style={{
@@ -472,11 +486,11 @@ export function ScheduleView() {
                 width: '50%',
                 height: Math.max(28, (nowHour - liveStartHour) * HOUR_H - 2),
                 borderRadius: 8,
-                backgroundColor: c.primary,
+                backgroundColor: theme.dark ? '#E4FF3A' : '#1a1a2e',
                 paddingHorizontal: 8,
                 paddingVertical: 4,
                 overflow: 'hidden',
-                shadowColor: c.primary,
+                shadowColor: '#000',
                 shadowOpacity: 0.4,
                 shadowRadius: 8,
                 shadowOffset: { width: 0, height: 2 },
@@ -497,13 +511,13 @@ export function ScheduleView() {
                       width: 7,
                       height: 7,
                       borderRadius: 3.5,
-                      backgroundColor: c.error,
+                      backgroundColor: theme.dark ? '#0C0B0A' : '#fff',
                     }}
                   />
                   <Text
                     style={{
                       ...M3Type.labelSmall,
-                      color: c.onPrimary,
+                      color: theme.dark ? '#0C0B0A' : '#fff',
                       textTransform: 'uppercase',
                     }}
                   >
@@ -513,7 +527,7 @@ export function ScheduleView() {
                 <Text
                   style={{
                     ...M3Type.labelSmall,
-                    color: c.onPrimary,
+                    color: theme.dark ? '#0C0B0A' : '#fff',
                     fontVariant: ['tabular-nums'],
                     opacity: 0.9,
                   }}
@@ -523,7 +537,11 @@ export function ScheduleView() {
               </View>
               <Text
                 numberOfLines={2}
-                style={{ ...M3Type.bodyMedium, color: c.onPrimary, marginTop: 2 }}
+                style={{
+                  ...M3Type.bodyMedium,
+                  color: theme.dark ? '#0C0B0A' : '#fff',
+                  marginTop: 2,
+                }}
               >
                 {liveTask.title}
               </Text>
@@ -540,7 +558,7 @@ export function ScheduleView() {
                 right: 16,
                 top: nowTopPx + 8,
                 height: 3,
-                backgroundColor: c.error,
+                backgroundColor: theme.dark ? '#E4FF3A' : '#1a1a2e',
                 zIndex: 10,
               }}
             >
@@ -552,7 +570,7 @@ export function ScheduleView() {
                   width: 12,
                   height: 12,
                   borderRadius: 6,
-                  backgroundColor: c.error,
+                  backgroundColor: theme.dark ? '#E4FF3A' : '#1a1a2e',
                 }}
               />
               <Text
@@ -562,7 +580,7 @@ export function ScheduleView() {
                   top: -20,
                   ...M3Type.labelMedium,
                   fontWeight: '700',
-                  color: c.error,
+                  color: theme.dark ? '#E4FF3A' : '#1a1a2e',
                   fontVariant: ['tabular-nums'],
                 }}
               >
@@ -639,7 +657,7 @@ export function ScheduleView() {
           setComposerOpen(false);
           setComposerSeedHour(null);
         }}
-        tasks={tasks.filter((t) => t.status !== 'done')}
+        tasks={tasks.filter((t) => t.effective_status !== 'done')}
         dayStart={dayStart}
         onCreate={async (taskId, startAt, durationMinutes) => {
           await addPlannedBlock({
@@ -908,6 +926,135 @@ function BlockComposer({
         </Pressable>
       </Pressable>
     </Modal>
+  );
+}
+
+// Phase 7 step D — drag-to-reschedule for planned blocks.
+//
+// The block body is a Pressable for long-press → delete (existing behavior).
+// A small ⋮⋮ handle in the top-right is wrapped in a GestureDetector with a
+// Pan gesture; only the handle starts the drag. This keeps long-press delete
+// from competing with the pan and matches mobile UX expectations (handle to
+// drag, body to interact). On release the parent commits the snap.
+function DraggablePlannedBlock({
+  top,
+  heightPx,
+  fill,
+  border,
+  title,
+  fgVariant,
+  fg,
+  onLongPress,
+  onCommitDrag,
+}: {
+  top: number;
+  heightPx: number;
+  fill: string;
+  border: string;
+  title: string;
+  fgVariant: string;
+  fg: string;
+  onLongPress: () => void;
+  onCommitDrag: (deltaPx: number) => void;
+}) {
+  const dragY = useSharedValue(0);
+
+  const pan = Gesture.Pan()
+    .onUpdate((e) => {
+      dragY.value = e.translationY;
+    })
+    .onEnd((e) => {
+      const finalDelta = e.translationY;
+      // Animate the visible block back to 0 — the parent's commit will
+      // re-render with the new `top` from the updated start_at, so we don't
+      // want a double-jump effect.
+      dragY.value = withTiming(0, { duration: 120 });
+      runOnJS(onCommitDrag)(finalDelta);
+    });
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: dragY.value }],
+  }));
+
+  return (
+    <Animated.View
+      style={[
+        {
+          position: 'absolute',
+          left: 48, // RAIL_W
+          top,
+          width: '46%',
+          height: heightPx,
+        },
+        animatedStyle,
+      ]}
+    >
+      <Pressable
+        onLongPress={onLongPress}
+        style={{
+          flex: 1,
+          borderRadius: 10,
+          borderWidth: 1,
+          borderColor: border,
+          backgroundColor: fill,
+          paddingHorizontal: 10,
+          paddingVertical: 6,
+          overflow: 'hidden',
+        }}
+      >
+        <View
+          style={{
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+          }}
+        >
+          <Text
+            style={{
+              ...M3Type.labelSmall,
+              color: fgVariant,
+              textTransform: 'uppercase',
+            }}
+          >
+            Plan
+          </Text>
+          {/* Drag handle in the top-right corner. Wrapped in GestureDetector
+              so only this surface initiates the pan. hitSlop expands the
+              touch target. */}
+          <GestureDetector gesture={pan}>
+            <View
+              hitSlop={10}
+              style={{
+                paddingHorizontal: 4,
+                paddingVertical: 2,
+                marginRight: -4,
+              }}
+            >
+              <Text
+                style={{
+                  color: fgVariant,
+                  fontSize: 14,
+                  fontWeight: '700',
+                  letterSpacing: -1,
+                }}
+              >
+                ⋮⋮
+              </Text>
+            </View>
+          </GestureDetector>
+        </View>
+        <Text
+          numberOfLines={2}
+          style={{
+            ...M3Type.bodyMedium,
+            color: fg,
+            marginTop: 2,
+          }}
+        >
+          {title}
+        </Text>
+      </Pressable>
+    </Animated.View>
   );
 }
 

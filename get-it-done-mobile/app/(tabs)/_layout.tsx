@@ -96,6 +96,28 @@ export default function TabsLayout() {
   const openRecurringTemplates = useCallback(() => {
     recurringSheetRef.current?.open();
   }, []);
+  const openNotifications = useCallback(() => {
+    notifSheetRef.current?.open();
+  }, []);
+  const openOverflowMenu = useCallback(() => {
+    overflowRef.current?.open([
+      {
+        icon: '🎯',
+        label: 'Categories',
+        onPress: () => categorySheetRef.current?.open(),
+      },
+      {
+        icon: '★',
+        label: 'Projects',
+        onPress: () => projectSheetRef.current?.open(),
+      },
+      {
+        icon: '#',
+        label: 'Tags',
+        onPress: () => tagSheetRef.current?.open(),
+      },
+    ]);
+  }, []);
 
   useEffect(() => {
     if (!userId || !prefs) return;
@@ -111,37 +133,23 @@ export default function TabsLayout() {
         openTodayFive,
         openFocusLockPicker,
         openRecurringTemplates,
+        openNotifications,
+        openOverflowMenu,
       }}
     >
       <SafeAreaView
         style={{ flex: 1, backgroundColor: theme.colors.background }}
         edges={['top']}
       >
-        <TopAppBar
-          title={header.title}
-          subtitle={header.subtitle}
-          unreadCount={unreadCount}
-          onOpenNotifications={() => notifSheetRef.current?.open()}
-          onOpenOverflow={() =>
-            overflowRef.current?.open([
-              {
-                icon: '🎯',
-                label: 'Categories',
-                onPress: () => categorySheetRef.current?.open(),
-              },
-              {
-                icon: '★',
-                label: 'Projects',
-                onPress: () => projectSheetRef.current?.open(),
-              },
-              {
-                icon: '#',
-                label: 'Tags',
-                onPress: () => tagSheetRef.current?.open(),
-              },
-            ])
-          }
-        />
+        {routeKey !== 'list' && (
+          <TopAppBar
+            title={header.title}
+            subtitle={header.subtitle}
+            unreadCount={unreadCount}
+            onOpenNotifications={openNotifications}
+            onOpenOverflow={openOverflowMenu}
+          />
+        )}
         <TrackingCard />
 
         <View style={{ flex: 1 }}>
@@ -182,10 +190,10 @@ export default function TabsLayout() {
             const today = new Date().toISOString().slice(0, 10);
             const pick =
               tasks.find(
-                (t) => t.planned_for_date === today && t.status !== 'done',
+                (t) => t.planned_for_date === today && t.effective_status !== 'done',
               ) ??
-              tasks.find((t) => t.status === 'in_progress') ??
-              tasks.find((t) => t.status === 'todo');
+              tasks.find((t) => t.effective_status === 'in_progress') ??
+              tasks.find((t) => t.effective_status === 'todo');
             if (pick) openFocusLockPicker(pick.id);
             else openAddTask('todo');
           }}

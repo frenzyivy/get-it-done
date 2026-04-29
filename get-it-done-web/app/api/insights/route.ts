@@ -9,6 +9,7 @@ import type {
   InsightsMatrixRow,
   InsightsTask,
   InsightsRange,
+  ProjectStatus,
 } from '@/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -304,7 +305,7 @@ export async function GET(req: Request) {
           id,
           name: p.name,
           color: p.color,
-          status: (p.status as 'active' | 'paused' | 'archived') ?? 'active',
+          status: (p.status as ProjectStatus) ?? 'active',
           total_seconds,
           task_count: projTaskSet.get(id)?.size ?? 0,
         };

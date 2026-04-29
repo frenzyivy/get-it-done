@@ -155,7 +155,7 @@ export function CategoryManagerModal({ onClose }: Props) {
                         </div>
                         <button
                           onClick={() => saveEdit(c.id)}
-                          className="text-[12px] font-bold text-white bg-[#8b5cf6] border-0 px-3 py-[5px] rounded-md cursor-pointer"
+                          className="text-[12px] font-bold text-white bg-[#1a1a2e] border-0 px-3 py-[5px] rounded-md cursor-pointer"
                         >
                           Save
                         </button>
@@ -184,7 +184,7 @@ export function CategoryManagerModal({ onClose }: Props) {
                         <div className="flex-1" />
                         <button
                           onClick={() => startEdit(c)}
-                          className="text-[12px] text-[#8b5cf6] bg-transparent border-0 cursor-pointer hover:underline"
+                          className="text-[12px] text-[#1a1a2e] bg-transparent border-0 cursor-pointer hover:underline"
                         >
                           Edit
                         </button>
@@ -213,7 +213,7 @@ export function CategoryManagerModal({ onClose }: Props) {
               onChange={(e) => setNewName(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && create()}
               placeholder="Category name…"
-              className="flex-1 min-w-[160px] border-[1.5px] border-[#e5e7eb] rounded-lg px-3 py-[6px] text-[13px] outline-none focus:border-[#8b5cf6]"
+              className="flex-1 min-w-[160px] border-[1.5px] border-[#e5e7eb] rounded-lg px-3 py-[6px] text-[13px] outline-none focus:border-[#1a1a2e]"
             />
             <div className="flex gap-[4px]">
               {TAG_COLORS.map((c) => (
@@ -234,7 +234,7 @@ export function CategoryManagerModal({ onClose }: Props) {
             <button
               onClick={create}
               disabled={!newName.trim() || creating}
-              className="bg-[#8b5cf6] text-white border-0 rounded-lg px-4 py-[6px] text-[13px] font-bold cursor-pointer disabled:opacity-50"
+              className="bg-[#1a1a2e] text-white border-0 rounded-lg px-4 py-[6px] text-[13px] font-bold cursor-pointer disabled:opacity-50"
             >
               {creating ? '…' : 'Add'}
             </button>

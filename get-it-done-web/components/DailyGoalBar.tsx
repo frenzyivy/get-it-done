@@ -22,7 +22,7 @@ export function DailyGoalBar() {
     .slice()
     .sort((a, b) => a.sort_order - b.sort_order);
   const todaysFive = plannedForToday.slice(0, DAILY_CAP);
-  const completedToday = todaysFive.filter((t) => t.status === 'done').length;
+  const completedToday = todaysFive.filter((t) => t.effective_status === 'done').length;
 
   const streak = profile?.current_streak ?? 0;
 
@@ -43,7 +43,7 @@ export function DailyGoalBar() {
           background: met
             ? 'linear-gradient(135deg, #d1fae5, #a7f3d0)'
             : 'linear-gradient(135deg, #ede9fe, #ddd6fe)',
-          border: `1.5px solid ${met ? '#10b981' : 'rgba(139,92,246,0.25)'}`,
+          border: `1.5px solid ${met ? '#10b981' : 'rgba(0,0,0,0.25)'}`,
         }}
         title="Open today's 5"
         aria-label="Open today's 5"
@@ -55,7 +55,7 @@ export function DailyGoalBar() {
             </span>
             <span
               className="text-[12px] font-bold"
-              style={{ color: met ? '#10b981' : '#8b5cf6' }}
+              style={{ color: met ? '#10b981' : '#1a1a2e' }}
             >
               {met ? '✓ ' : ''}
               {completedToday} / {DAILY_CAP} tasks
@@ -79,7 +79,7 @@ export function DailyGoalBar() {
         <ProgressBar
           value={pct}
           height={6}
-          accent={met ? '#10b981' : '#8b5cf6'}
+          accent={met ? '#10b981' : '#1a1a2e'}
         />
       </button>
       {open && <TodayFiveDrawer onClose={() => setOpen(false)} />}

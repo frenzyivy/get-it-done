@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Dimensions, Pressable, ScrollView, Text, View } from 'react-native';
 import { useStore } from '@/lib/store';
 import { useLiveTimers } from '@/lib/useLiveTimer';
 import { useUI } from '@/lib/ui-context';
@@ -64,6 +64,8 @@ export function TimelineGantt({
   }, []);
 
   const [selected, setSelected] = useState<BlockMeta | null>(null);
+  const scrollRef = useRef<ScrollView | null>(null);
+  const didCenterRef = useRef(false);
 
   const plannedMeta: BlockMeta[] = useMemo(
     () =>
@@ -184,6 +186,22 @@ export function TimelineGantt({
   const xPx = (ms: number) => ((ms - windowStartMs) / totalMs) * CHART_WIDTH;
   const showNow = nowMs >= windowStartMs && nowMs <= windowEndMs;
 
+  // Auto-center on "now" the first time the chart mounts. Mirrors the web
+  // TimelineGantt centering — runs once per mount, user scrolling thereafter
+  // is preserved.
+  useEffect(() => {
+    if (didCenterRef.current) return;
+    if (!showNow) return;
+    const screenW = Dimensions.get('window').width;
+    const nowPx = xPx(nowMs);
+    const target = Math.max(0, nowPx - screenW / 2);
+    const id = setTimeout(() => {
+      scrollRef.current?.scrollTo({ x: target, animated: false });
+      didCenterRef.current = true;
+    }, 0);
+    return () => clearTimeout(id);
+  }, [nowMs, xPx, showNow]);
+
   // Empty state — only when both tracks are empty (per spec).
   if (plannedMeta.length === 0 && actualMeta.length === 0) {
     return (
@@ -274,7 +292,7 @@ export function TimelineGantt({
         </View>
       </View>
 
-      <ScrollView horizontal showsHorizontalScrollIndicator>
+      <ScrollView ref={scrollRef} horizontal showsHorizontalScrollIndicator>
         <View style={{ width: CHART_WIDTH, height: CHART_HEIGHT }}>
           {/* Hour tick labels */}
           {ticks.map((t) => (

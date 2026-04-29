@@ -21,7 +21,7 @@ export function RolloverPromptSheet() {
           (t) =>
             t.planned_for_date !== null &&
             t.planned_for_date < today &&
-            t.status !== 'done',
+            t.effective_status !== 'done',
         )
         .sort((a, b) => {
           if (a.planned_for_date! > b.planned_for_date!) return -1;

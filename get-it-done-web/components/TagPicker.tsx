@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
+import { useDismissOnOutside } from '@/lib/hooks/useDismissOnOutside';
 import type { TagType } from '@/types';
 
 interface Props {
@@ -11,13 +12,15 @@ interface Props {
 
 export function TagPicker({ tags, selectedIds, onChange }: Props) {
   const [show, setShow] = useState(false);
+  const close = useCallback(() => setShow(false), []);
+  const rootRef = useDismissOnOutside<HTMLDivElement>(show, close);
   const toggle = (id: string) =>
     onChange(
       selectedIds.includes(id) ? selectedIds.filter((x) => x !== id) : [...selectedIds, id],
     );
 
   return (
-    <div className="relative">
+    <div ref={rootRef} className="relative">
       <button
         onClick={() => setShow((v) => !v)}
         className="text-xs px-[10px] py-1 rounded-lg border-[1.5px] border-[#e5e7eb] cursor-pointer bg-white text-[#666]"
@@ -50,12 +53,9 @@ export function TagPicker({ tags, selectedIds, onChange }: Props) {
             </div>
           ))}
           <div className="border-t border-[#eee] mt-1 pt-1">
-            <button
-              onClick={() => setShow(false)}
-              className="w-full py-1 border-0 bg-transparent text-xs text-[#8b5cf6] font-bold cursor-pointer"
-            >
-              Done
-            </button>
+            <div className="text-[10px] font-mono text-[#9ca3af] text-center py-1 lowercase tracking-wider">
+              click outside or press esc to close
+            </div>
           </div>
         </div>
       )}

@@ -6,7 +6,7 @@ interface Props {
 
 export function ProgressBar({ value, height = 6, accent }: Props) {
   const fill =
-    accent ?? (value === 100 ? '#10b981' : value > 50 ? '#f59e0b' : '#8b5cf6');
+    accent ?? (value === 100 ? '#10b981' : value > 50 ? '#f59e0b' : '#1a1a2e');
   return (
     <div
       className="w-full overflow-hidden bg-black/[.06]"

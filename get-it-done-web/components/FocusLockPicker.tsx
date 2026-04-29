@@ -153,8 +153,8 @@ export function FocusLockPicker() {
               aria-checked={active}
               className="block w-full text-left rounded-[14px] p-[14px] mb-[10px] border-[2px] transition-colors"
               style={{
-                borderColor: active ? '#8b5cf6' : '#E5E5E5',
-                background: active ? '#F5F2FF' : '#fff',
+                borderColor: active ? '#1a1a2e' : '#E5E5E5',
+                background: active ? '#f3f4f6' : '#fff',
               }}
             >
               <div className="flex items-center gap-2">
@@ -188,9 +188,9 @@ export function FocusLockPicker() {
                 onClick={() => setMinutes(d.minutes)}
                 className="flex-1 border-[2px] rounded-[10px] py-[10px] text-[14px] font-bold transition-colors"
                 style={{
-                  borderColor: active ? '#8b5cf6' : '#E5E5E5',
-                  background: active ? '#F5F2FF' : '#fff',
-                  color: active ? '#8b5cf6' : '#1a1a2e',
+                  borderColor: active ? '#1a1a2e' : '#E5E5E5',
+                  background: active ? '#f3f4f6' : '#fff',
+                  color: active ? '#1a1a2e' : '#1a1a2e',
                 }}
               >
                 {d.label}
@@ -203,7 +203,7 @@ export function FocusLockPicker() {
           onClick={handleStart}
           disabled={!picker.taskId || submitting}
           className="block w-full mt-[22px] rounded-[14px] py-4 text-[15px] font-extrabold text-white disabled:opacity-50"
-          style={{ background: '#8b5cf6' }}
+          style={{ background: '#1a1a2e' }}
         >
           {submitting ? 'Starting…' : buttonLabel}
         </button>

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { supabase } from './supabase';
 import { labelsApi } from './labels-api';
+import { fetchStreakHistory as fetchStreakHistoryApi } from './insights';
 import type {
   TaskType,
   TagType,
@@ -23,6 +24,7 @@ import type {
   DriftEvent,
   RecurringTemplate,
   NewRecurringTemplateInput,
+  DailyTargets,
 } from '@/types';
 
 interface TaskRow {
@@ -31,6 +33,7 @@ interface TaskRow {
   title: string;
   description: string | null;
   status: Status;
+  completed_at: string | null;
   priority: TaskType['priority'];
   due_date: string | null;
   total_time_seconds: number;
@@ -45,7 +48,26 @@ interface TaskRow {
   time_sessions: TimeSession[] | null;
 }
 
-function rowToTask(row: TaskRow): TaskType {
+/**
+ * Mirror of v_task_status (migration 0023). Used as a fallback when the view
+ * row is missing for a freshly-inserted task, and for OPTIMISTIC updates after
+ * mutations. The view-merged value from fetchTasks is the source of truth and
+ * replaces this on the next fetch.
+ *
+ * Same caveat as web: this can't see *open* sessions (tracked_sessions with
+ * ended_at IS NULL). For Done-checkbox toggles the closed-session set is
+ * enough; live sessions are tracked separately via activeSessions[].
+ */
+export function deriveEffectiveStatus(
+  task: Pick<TaskType, 'completed_at' | 'sessions'>,
+): Status {
+  if (task.completed_at) return 'done';
+  const hasWork = task.sessions.some((s) => (s.duration_seconds ?? 0) > 0);
+  if (hasWork) return 'in_progress';
+  return 'todo';
+}
+
+function rowToTask(row: TaskRow, effectiveStatus: Status): TaskType {
   const subtasks = (row.subtasks ?? [])
     .slice()
     .sort((a, b) => a.sort_order - b.sort_order);
@@ -55,6 +77,8 @@ function rowToTask(row: TaskRow): TaskType {
     title: row.title,
     description: row.description ?? null,
     status: row.status,
+    effective_status: effectiveStatus,
+    completed_at: row.completed_at ?? null,
     priority: row.priority,
     due_date: row.due_date,
     total_time_seconds: row.total_time_seconds,
@@ -137,6 +161,38 @@ interface Store {
   openFocusMode: (sessionId: string) => void;
   closeFocusMode: () => void;
   clearStopSummary: () => void;
+
+  // Calendar view (Phase 7 step C). dailyTargets is one row from
+  // daily_targets (RLS-scoped); secondsByDay is keyed YYYY-MM-DD in local
+  // time, populated by fetchSessionsByDay(from, to).
+  dailyTargets: DailyTargets | null;
+  fetchDailyTargets: () => Promise<void>;
+  secondsByDay: Record<string, number>;
+  secondsByDayRange: { from: string; to: string } | null;
+  fetchSessionsByDay: (from: string, to: string) => Promise<void>;
+
+  // When You Work heatmap (Phase 7 step E). 7×24 matrix indexed
+  // [day][hour] where day is 0=Sun..6=Sat (matching JS Date.getDay()) and
+  // hour is 0..23. Bucketed by session.started_at in the device's local
+  // timezone. Hour-crossers and midnight-crossers fall entirely in their
+  // start cell — same simplified directional-signal model.
+  hourOfWeekRange: '7d' | '30d' | '90d';
+  hourOfWeekMatrix: number[][] | null;
+  hourOfWeekFetchedFor: '7d' | '30d' | '90d' | null;
+  setHourOfWeekRange: (range: '7d' | '30d' | '90d') => void;
+  fetchHourOfWeek: (force?: boolean) => Promise<void>;
+
+  // Streak history (Phase 7 step E2) — last 84 days of streak length.
+  // Hits the deployed web endpoint via EXPO_PUBLIC_WEB_URL so the streak
+  // rule stays single-sourced. Cache key is the local-tz "today" date.
+  streakHistory: {
+    days: { date: string; streak: number; qualified: boolean }[];
+    peakValue: number;
+    peakDate: string | null;
+    today: string;
+  } | null;
+  streakHistoryFetchedFor: string | null;
+  fetchStreakHistory: (force?: boolean) => Promise<void>;
 
   recurringTemplates: RecurringTemplate[];
   fetchRecurringTemplates: () => Promise<void>;
@@ -498,11 +554,19 @@ export const useStore = create<Store>((set, get) => ({
     const row = data as TrackedSession;
     set((s) => ({ activeSessions: [...s.activeSessions, row] }));
 
-    // Auto-promote todo → in_progress when work actively starts (web parity).
+    // Auto-promote todo → in_progress when work actively starts. The view
+    // (v_task_status) already sees this as in_progress because the open
+    // session promotes it; this block keeps legacy `tasks.status` in sync and
+    // also flips effective_status optimistically so the UI updates without a
+    // refetch round-trip.
     const parent = get().tasks.find((t) => t.id === taskId);
-    if (parent && parent.status === 'todo') {
+    if (parent && parent.effective_status === 'todo') {
       set((s) => ({
-        tasks: s.tasks.map((t) => (t.id === taskId ? { ...t, status: 'in_progress' } : t)),
+        tasks: s.tasks.map((t) =>
+          t.id === taskId
+            ? { ...t, status: 'in_progress', effective_status: 'in_progress' }
+            : t,
+        ),
       }));
       const { error: promoteErr } = await supabase
         .from('tasks')
@@ -510,7 +574,11 @@ export const useStore = create<Store>((set, get) => ({
         .eq('id', taskId);
       if (promoteErr) {
         set((s) => ({
-          tasks: s.tasks.map((t) => (t.id === taskId ? { ...t, status: 'todo' } : t)),
+          tasks: s.tasks.map((t) =>
+            t.id === taskId
+              ? { ...t, status: 'todo', effective_status: 'todo' }
+              : t,
+          ),
         }));
       }
     }
@@ -652,6 +720,150 @@ export const useStore = create<Store>((set, get) => ({
 
   plannedBlocks: [],
 
+  // Calendar view state — initial nulls; lazy-fetched on first mount.
+  dailyTargets: null,
+  secondsByDay: {},
+  secondsByDayRange: null,
+  fetchDailyTargets: async () => {
+    const { userId } = get();
+    if (!userId) return;
+    const { data, error } = await supabase
+      .from('daily_targets')
+      .select('*')
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (error) {
+      console.error('[store.fetchDailyTargets]', error.message);
+      return;
+    }
+    if (data) {
+      set({ dailyTargets: data as DailyTargets });
+      return;
+    }
+    // No row yet — insert the spec's "Balanced" preset and use that. The
+    // table defaults match the preset, so an INSERT with empty body works.
+    const { data: inserted, error: insErr } = await supabase
+      .from('daily_targets')
+      .insert({ user_id: userId, preset_name: 'balanced' })
+      .select()
+      .single();
+    if (insErr) {
+      console.error('[store.fetchDailyTargets][insert]', insErr.message);
+      return;
+    }
+    set({ dailyTargets: inserted as DailyTargets });
+  },
+  fetchSessionsByDay: async (from, to) => {
+    const { userId } = get();
+    if (!userId) return;
+    // Pad ±1 day so timezone offsets never miss sessions; final filtering
+    // happens in JS by formatted local date. Mirrors the web by-day route.
+    const padDay = (iso: string, deltaDays: number): string => {
+      const [y, m, d] = iso.split('-').map(Number);
+      const t = Date.UTC(y, m - 1, d) + deltaDays * 24 * 60 * 60 * 1000;
+      return new Date(t).toISOString();
+    };
+    const sinceIso = padDay(from, -1);
+    const untilIso = padDay(to, 2);
+    const { data, error } = await supabase
+      .from('tracked_sessions')
+      .select('started_at, duration_seconds')
+      .eq('user_id', userId)
+      .gte('started_at', sinceIso)
+      .lt('started_at', untilIso)
+      .not('duration_seconds', 'is', null);
+    if (error) {
+      console.error('[store.fetchSessionsByDay]', error.message);
+      return;
+    }
+    const fmt = new Intl.DateTimeFormat('en-CA', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    const out: Record<string, number> = {};
+    for (const row of (data ?? []) as { started_at: string; duration_seconds: number | null }[]) {
+      const seconds = row.duration_seconds ?? 0;
+      if (seconds <= 0) continue;
+      const localDate = fmt.format(new Date(row.started_at));
+      if (localDate < from || localDate > to) continue;
+      out[localDate] = (out[localDate] ?? 0) + seconds;
+    }
+    set({ secondsByDay: out, secondsByDayRange: { from, to } });
+  },
+
+  hourOfWeekRange: '30d',
+  hourOfWeekMatrix: null,
+  hourOfWeekFetchedFor: null,
+  setHourOfWeekRange: (range) => {
+    set({ hourOfWeekRange: range });
+    void get().fetchHourOfWeek();
+  },
+  fetchHourOfWeek: async (force) => {
+    const { userId, hourOfWeekRange, hourOfWeekFetchedFor } = get();
+    if (!userId) return;
+    if (!force && hourOfWeekFetchedFor === hourOfWeekRange) return;
+    const days = hourOfWeekRange === '7d' ? 7 : hourOfWeekRange === '30d' ? 30 : 90;
+    const sinceMs = Date.now() - days * 24 * 60 * 60 * 1000;
+    const sinceIso = new Date(sinceMs).toISOString();
+    const { data, error } = await supabase
+      .from('tracked_sessions')
+      .select('started_at, duration_seconds')
+      .eq('user_id', userId)
+      .gte('started_at', sinceIso)
+      .not('duration_seconds', 'is', null);
+    if (error) {
+      console.error('[store.fetchHourOfWeek]', error.message);
+      return;
+    }
+    // 7 days × 24 hours, all zeros.
+    const matrix: number[][] = Array.from({ length: 7 }, () =>
+      Array<number>(24).fill(0),
+    );
+    for (const row of (data ?? []) as { started_at: string; duration_seconds: number | null }[]) {
+      const seconds = row.duration_seconds ?? 0;
+      if (seconds <= 0) continue;
+      const d = new Date(row.started_at);
+      const dow = d.getDay(); // 0=Sun..6=Sat
+      const hour = d.getHours();
+      if (dow < 0 || dow > 6 || hour < 0 || hour > 23) continue;
+      matrix[dow][hour] += seconds;
+    }
+    set({ hourOfWeekMatrix: matrix, hourOfWeekFetchedFor: hourOfWeekRange });
+  },
+
+  streakHistory: null,
+  streakHistoryFetchedFor: null,
+  fetchStreakHistory: async (force) => {
+    const { userId, streakHistoryFetchedFor } = get();
+    if (!userId) return;
+    // Cache key is local-tz "today" date string. Server resolves the user's
+    // tz independently; if the local guess differs, worst case is one extra
+    // fetch on the day boundary.
+    const localTodayKey = (() => {
+      const d = new Date();
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    })();
+    if (!force && streakHistoryFetchedFor === localTodayKey) return;
+    try {
+      const json = await fetchStreakHistoryApi();
+      set({
+        streakHistory: {
+          days: json.days,
+          peakValue: json.peak_value,
+          peakDate: json.peak_date,
+          today: json.today,
+        },
+        streakHistoryFetchedFor: json.today,
+      });
+    } catch (e) {
+      console.error('[store.fetchStreakHistory]', (e as Error).message);
+    }
+  },
+
   recurringTemplates: [],
 
   fetchRecurringTemplates: async () => {
@@ -786,25 +998,43 @@ export const useStore = create<Store>((set, get) => ({
   fetchTasks: async () => {
     const { userId } = get();
     if (!userId) return;
-    const { data, error } = await supabase
-      .from('tasks')
-      .select(
-        `
-        id, user_id, title, description, status, priority, due_date,
-        total_time_seconds, estimated_seconds, sort_order, allow_alarms,
-        planned_for_date,
-        subtasks ( id, task_id, title, is_done, total_time_seconds, sort_order ),
-        task_tags ( tag_id ),
-        task_categories ( category_id ),
-        task_projects ( project_id ),
-        time_sessions ( id, task_id, subtask_id, started_at, duration_seconds, label )
-      `,
-      )
-      .eq('user_id', userId)
-      .order('sort_order', { ascending: true });
-    if (error) throw error;
-    const rows = (data ?? []) as unknown as TaskRow[];
-    set({ tasks: rows.map(rowToTask) });
+    // Parallel two-query merge — same shape as web (Phase 1 step 3). The
+    // tasks table is fetched with embeds; v_task_status (migration 0023) is
+    // a derived read-only view that PostgREST can't embed because views have
+    // no FK relationships. Merge by id; fall back to row.status when a row
+    // is missing from the view (e.g., immediately after insert).
+    const [tasksRes, statusRes] = await Promise.all([
+      supabase
+        .from('tasks')
+        .select(
+          `
+          id, user_id, title, description, status, completed_at, priority, due_date,
+          total_time_seconds, estimated_seconds, sort_order, allow_alarms,
+          planned_for_date,
+          subtasks ( id, task_id, title, is_done, total_time_seconds, sort_order ),
+          task_tags ( tag_id ),
+          task_categories ( category_id ),
+          task_projects ( project_id ),
+          time_sessions ( id, task_id, subtask_id, started_at, duration_seconds, label )
+        `,
+        )
+        .eq('user_id', userId)
+        .order('sort_order', { ascending: true }),
+      supabase
+        .from('v_task_status')
+        .select('id, effective_status')
+        .eq('user_id', userId),
+    ]);
+    if (tasksRes.error) throw tasksRes.error;
+    if (statusRes.error) throw statusRes.error;
+    const statusRows = (statusRes.data ?? []) as { id: string; effective_status: Status }[];
+    const statusMap = new Map<string, Status>(
+      statusRows.map((r) => [r.id, r.effective_status]),
+    );
+    const rows = (tasksRes.data ?? []) as unknown as TaskRow[];
+    set({
+      tasks: rows.map((row) => rowToTask(row, statusMap.get(row.id) ?? row.status)),
+    });
   },
 
   addTask: async (input) => {
@@ -842,17 +1072,22 @@ export const useStore = create<Store>((set, get) => ({
       await labelsApi.attachProject(task.id, projectId);
     }
     const newTask: TaskType = {
-      ...rowToTask({
-        ...task,
-        description: task.description ?? null,
-        allow_alarms: task.allow_alarms ?? false,
-        planned_for_date: task.planned_for_date ?? null,
-        subtasks: [],
-        task_tags: [],
-        task_categories: [],
-        task_projects: [],
-        time_sessions: [],
-      }),
+      ...rowToTask(
+        {
+          ...task,
+          description: task.description ?? null,
+          completed_at: task.completed_at ?? null,
+          allow_alarms: task.allow_alarms ?? false,
+          planned_for_date: task.planned_for_date ?? null,
+          subtasks: [],
+          task_tags: [],
+          task_categories: [],
+          task_projects: [],
+          time_sessions: [],
+        },
+        // Brand-new task with no sessions and no completed_at → 'todo'.
+        deriveEffectiveStatus({ completed_at: task.completed_at ?? null, sessions: [] }),
+      ),
       tag_ids: input.tag_ids,
       category_ids: categoryIds,
       project_ids: projectIds,
@@ -863,14 +1098,29 @@ export const useStore = create<Store>((set, get) => ({
 
   updateTask: async (id, updates) => {
     const prev = get().tasks;
+    // Optimistic update. If `completed_at` is part of the patch, also flip
+    // effective_status so the UI updates instantly without waiting for the
+    // next fetchTasks to merge v_task_status. Setting completed_at to a
+    // value → 'done'; clearing it → re-derive from sessions/legacy status.
     set((s) => ({
-      tasks: s.tasks.map((t) => (t.id === id ? { ...t, ...updates } : t)),
+      tasks: s.tasks.map((t) => {
+        if (t.id !== id) return t;
+        const next = { ...t, ...updates };
+        if (updates.completed_at !== undefined) {
+          next.effective_status = deriveEffectiveStatus({
+            completed_at: next.completed_at,
+            sessions: next.sessions,
+          });
+        }
+        return next;
+      }),
     }));
     const payload: Record<string, unknown> = {};
     if (updates.title !== undefined) payload.title = updates.title;
     if (updates.description !== undefined) payload.description = updates.description;
     if (updates.priority !== undefined) payload.priority = updates.priority;
     if (updates.status !== undefined) payload.status = updates.status;
+    if (updates.completed_at !== undefined) payload.completed_at = updates.completed_at;
     if (updates.due_date !== undefined) payload.due_date = updates.due_date;
     if (updates.estimated_seconds !== undefined)
       payload.estimated_seconds = updates.estimated_seconds;

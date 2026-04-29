@@ -5,7 +5,7 @@ export const runtime = 'nodejs';
 
 export const OPTIONS = () => preflight();
 
-const VALID_STATUS = new Set(['active', 'paused', 'archived']);
+const VALID_STATUS = new Set(['active', 'paused', 'completed', 'archived']);
 
 interface Ctx {
   params: Promise<{ id: string }>;

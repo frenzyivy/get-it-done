@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { fmtShort, fmtDueDate, getProgress, isOverdue, todayISO, tomorrowISO } from '@/lib/utils';
+import { fmtShort, fmtDueDate, getProgress, isOverdue, todayISO, tomorrowISO, whyInProgressLine } from '@/lib/utils';
 import { useStore } from '@/lib/store';
 import { useLiveTimers } from '@/lib/useLiveTimer';
 import { PriorityBadge } from './PriorityBadge';
@@ -13,7 +13,7 @@ import { SubtaskItem } from './SubtaskItem';
 import { AddSubtask } from './AddSubtask';
 import { PomodoroTimer } from './PomodoroTimer';
 import { EditTaskDrawer } from './EditTaskDrawer';
-import type { Status, TaskType } from '@/types';
+import type { TaskType } from '@/types';
 
 interface Props {
   task: TaskType;
@@ -66,8 +66,11 @@ export function TaskCard({ task, compact = false }: Props) {
 
   const handleCheckbox = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    const next: Status = task.status === 'done' ? 'in_progress' : 'done';
-    await updateTask(task.id, { status: next });
+    const isCurrentlyDone = task.effective_status === 'done';
+    await updateTask(task.id, {
+      status: isCurrentlyDone ? 'in_progress' : 'done',  // legacy column, kept for mobile
+      completed_at: isCurrentlyDone ? null : new Date().toISOString(),
+    });
   };
 
   // "Today's 5" quick actions. If toggling a task ONTO today while 5 are
@@ -120,7 +123,7 @@ export function TaskCard({ task, compact = false }: Props) {
   };
 
   const progress = getProgress(task.subtasks);
-  const overdue = isOverdue(task.due_date, task.status);
+  const overdue = isOverdue(task.due_date, task.effective_status);
   const taskTags = task.tag_ids.map((id) => tags.find((t) => t.id === id));
   const taskCategories = task.category_ids
     .map((id) => categories.find((c) => c.id === id))
@@ -141,13 +144,13 @@ export function TaskCard({ task, compact = false }: Props) {
   const invested = task.total_time_seconds + liveElapsedForCard;
 
   const baseShadow = '0 1px 4px rgba(0,0,0,0.06), 0 0 0 1px rgba(0,0,0,0.04)';
-  const hoverShadow = '0 4px 16px rgba(139,92,246,0.13), 0 0 0 1px rgba(139,92,246,0.18)';
+  const hoverShadow = '0 4px 16px rgba(0,0,0,0.13), 0 0 0 1px rgba(0,0,0,0.18)';
   const runningShadow =
-    '0 4px 20px rgba(139,92,246,0.2), 0 0 0 2px rgba(139,92,246,0.25)';
+    '0 4px 20px rgba(0,0,0,0.2), 0 0 0 2px rgba(0,0,0,0.25)';
 
   const doneCount = task.subtasks.filter((s) => s.is_done).length;
   const incompleteSubsOnDone =
-    task.status === 'done' && task.subtasks.length > 0 && doneCount < task.subtasks.length;
+    task.effective_status === 'done' && task.subtasks.length > 0 && doneCount < task.subtasks.length;
 
   // Feature 2b — over-estimate visual states for the invested chip.
   let investedColor = '#888';
@@ -164,12 +167,18 @@ export function TaskCard({ task, compact = false }: Props) {
 
   return (
     <>
+      <style>{`
+        @keyframes taskCardLivePulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.5; transform: scale(1.4); }
+        }
+      `}</style>
       <div
         className="bg-white rounded-[14px] transition-shadow duration-300"
         style={{
           padding: compact ? 14 : 18,
           boxShadow: running || isTrackingThisCard ? runningShadow : baseShadow,
-          borderLeft: isTrackingThisCard ? '3px solid #8b5cf6' : '3px solid transparent',
+          borderLeft: isTrackingThisCard ? '3px solid #1a1a2e' : '3px solid transparent',
         }}
         onMouseEnter={(e) => {
           if (!running && !isTrackingThisCard)
@@ -186,13 +195,13 @@ export function TaskCard({ task, compact = false }: Props) {
             onClick={handleCheckbox}
             className="w-[20px] h-[20px] rounded-[6px] flex items-center justify-center text-white text-xs shrink-0 transition-all cursor-pointer mt-[1px]"
             style={{
-              border: task.status === 'done' ? 'none' : '2px solid #ccc',
-              background: task.status === 'done' ? '#10b981' : 'transparent',
+              border: task.effective_status === 'done' ? 'none' : '2px solid #ccc',
+              background: task.effective_status === 'done' ? '#10b981' : 'transparent',
             }}
-            title={task.status === 'done' ? 'Mark as in progress' : 'Mark as done'}
-            aria-label={task.status === 'done' ? 'Mark as in progress' : 'Mark as done'}
+            title={task.effective_status === 'done' ? 'Mark as in progress' : 'Mark as done'}
+            aria-label={task.effective_status === 'done' ? 'Mark as in progress' : 'Mark as done'}
           >
-            {task.status === 'done' ? '✓' : ''}
+            {task.effective_status === 'done' ? '✓' : ''}
           </button>
           {timerIcon}
           <button
@@ -208,7 +217,7 @@ export function TaskCard({ task, compact = false }: Props) {
               <span
                 className={`font-bold leading-[1.3] ${
                   compact ? 'text-sm' : 'text-[15px]'
-                } ${task.status === 'done' ? 'line-through text-[#888]' : 'text-[#1a1a2e]'}`}
+                } ${task.effective_status === 'done' ? 'line-through text-[#888]' : 'text-[#1a1a2e]'}`}
               >
                 {task.title}
               </span>
@@ -222,21 +231,56 @@ export function TaskCard({ task, compact = false }: Props) {
                   ⚠ {task.subtasks.length - doneCount} not done
                 </span>
               )}
-              {/* Feature 2b — Invested chip (always shown so totals are visible) */}
+              {/* Spec § Task time displays — two-line block with thin hairline
+                  divider before it. Replaces the old "⏱ Xs" pill. Live state
+                  (currently tracking) shows a pulsing white-on-purple dot
+                  prefix to match the NowTrackingBar pattern. The "TOTAL
+                  TRACKED" / "NEVER STARTED" label flips on 0s. Estimate kept
+                  separately at lower visual weight when present. */}
               <span
-                className="text-[11px] font-bold px-[7px] py-[1px] rounded-md whitespace-nowrap"
-                style={{ background: investedBg, color: investedColor }}
-                title={`Invested ${fmtShort(invested)}`}
+                className="self-stretch w-px"
+                style={{ background: 'rgba(0,0,0,0.08)' }}
+                aria-hidden
+              />
+              <span
+                className="inline-flex flex-col items-end leading-[1.1]"
+                title={
+                  invested > 0
+                    ? `Total tracked: ${fmtShort(invested)}`
+                    : 'No time logged yet'
+                }
               >
-                ⏱ {fmtShort(invested)}
+                <span
+                  className="font-mono tabular-nums font-extrabold flex items-center gap-[5px]"
+                  style={{
+                    color: invested > 0 ? investedColor : '#9ca3af',
+                    background: invested > 0 ? investedBg : 'transparent',
+                    padding: invested > 0 && investedBg !== 'rgba(0,0,0,0.04)' ? '0 6px' : 0,
+                    borderRadius: 4,
+                    fontSize: 13,
+                  }}
+                >
+                  {isTrackingThisCard && (
+                    <span
+                      className="w-[6px] h-[6px] rounded-full bg-[#1a1a2e]"
+                      style={{
+                        animation: 'taskCardLivePulse 1.4s ease-in-out infinite',
+                      }}
+                      aria-hidden
+                    />
+                  )}
+                  {invested > 0 ? fmtShort(invested) : '0s'}
+                </span>
+                <span className="text-[8px] font-mono uppercase tracking-[1px] text-[#9ca3af] mt-[1px]">
+                  {invested > 0 ? 'Total tracked' : 'Never started'}
+                </span>
               </span>
               {task.estimated_seconds && task.estimated_seconds > 0 && (
                 <span
-                  className="text-[11px] font-semibold px-[7px] py-[1px] rounded-md whitespace-nowrap"
-                  style={{ background: 'rgba(0,0,0,0.04)', color: '#888' }}
+                  className="text-[10px] font-mono tracking-wider whitespace-nowrap text-[#888] uppercase"
                   title={`Estimated ${fmtShort(task.estimated_seconds)}`}
                 >
-                  Est {fmtShort(task.estimated_seconds)}
+                  est {fmtShort(task.estimated_seconds)}
                 </span>
               )}
             </div>
@@ -268,8 +312,8 @@ export function TaskCard({ task, compact = false }: Props) {
             onClick={handleQuickPlay}
             className="w-6 h-6 rounded-full border-0 cursor-pointer flex items-center justify-center text-xs font-bold shrink-0"
             style={{
-              background: isTrackingThisTask ? '#8b5cf6' : 'rgba(139,92,246,0.1)',
-              color: isTrackingThisTask ? '#fff' : '#8b5cf6',
+              background: isTrackingThisTask ? '#1a1a2e' : 'rgba(0,0,0,0.1)',
+              color: isTrackingThisTask ? '#fff' : '#1a1a2e',
             }}
             title={isTrackingThisTask ? 'Stop timer' : 'Track whole task'}
             aria-label={isTrackingThisTask ? 'Stop timer' : 'Track whole task'}
@@ -315,7 +359,7 @@ export function TaskCard({ task, compact = false }: Props) {
               e.stopPropagation();
               setEditing(true);
             }}
-            className="bg-transparent border-0 text-[#ccc] cursor-pointer text-sm p-0 leading-none hover:text-[#8b5cf6]"
+            className="bg-transparent border-0 text-[#ccc] cursor-pointer text-sm p-0 leading-none hover:text-[#1a1a2e]"
             title="Edit task"
             aria-label="Edit task"
           >
@@ -336,20 +380,61 @@ export function TaskCard({ task, compact = false }: Props) {
         {panel}
 
         <div className="mt-2" style={{ marginBottom: expanded ? 8 : 0 }}>
-          <div className="flex items-center gap-2 mb-1">
-            <ProgressBar value={progress} />
-            <span
-              className="text-xs font-bold min-w-[36px] text-right"
-              style={{ color: progress === 100 ? '#10b981' : '#8b5cf6' }}
-            >
-              {progress}%
-            </span>
-          </div>
-          <span className="text-[11px] text-[#aaa]">
-            {doneCount}/{task.subtasks.length} subtasks
-          </span>
+          {/* Spec §6 / Change #5 — Priority view uses compact cards with no
+              progress bar visible by default. Subtask count + the "↳ In
+              Progress …" line still render so the card stays informative. */}
+          {!compact && (
+            <>
+              <div className="flex items-center gap-2 mb-1">
+                <ProgressBar value={progress} />
+                <span
+                  className="text-xs font-bold min-w-[36px] text-right"
+                  style={{ color: progress === 100 ? '#10b981' : '#1a1a2e' }}
+                >
+                  {progress}%
+                </span>
+              </div>
+              <span className="text-[11px] text-[#aaa]">
+                {doneCount}/{task.subtasks.length} subtasks
+              </span>
+            </>
+          )}
+          {/* Spec Change #1 — surface why a task is showing as In Progress.
+              Status is derived from logged time; this line tells the user
+              what's behind the derivation. */}
+          {task.effective_status === 'in_progress' && (
+            <div className="text-[12px] italic text-[#6b7280] mt-[6px]">
+              {whyInProgressLine(task)}
+            </div>
+          )}
         </div>
 
+        {/* Spec § Task time displays — rollup bar between progress bar and
+            subtask list. Only shown when the card is expanded AND there are
+            subtasks. Format: [TIME BREAKDOWN] ━ X of Y subtasks worked  47m 23s */}
+        {expanded && task.subtasks.length > 0 && (
+          <div
+            className="mt-[8px] flex items-center gap-[8px] px-[10px] py-[6px] rounded-md"
+            style={{ background: 'rgba(0,0,0,0.03)' }}
+          >
+            <span className="text-[9px] font-mono uppercase tracking-[1.5px] font-bold text-[#9ca3af] shrink-0">
+              Time breakdown
+            </span>
+            <span
+              className="flex-1 h-px"
+              style={{ background: 'rgba(0,0,0,0.08)' }}
+              aria-hidden
+            />
+            <span className="text-[10px] font-mono tracking-wider text-[#666] shrink-0">
+              {task.subtasks.filter((s) => s.total_time_seconds > 0).length} of{' '}
+              {task.subtasks.length} subtask
+              {task.subtasks.length === 1 ? '' : 's'} worked
+            </span>
+            <span className="text-[11px] font-mono tabular-nums font-bold text-[#1a1a2e] shrink-0">
+              {fmtShort(task.subtasks.reduce((sum, s) => sum + s.total_time_seconds, 0))}
+            </span>
+          </div>
+        )}
         {expanded && (
           <div className="mt-[6px]">
             {task.subtasks.map((s) => (

@@ -23,7 +23,7 @@ export function RolloverPromptModal() {
         (t) =>
           t.planned_for_date !== null &&
           t.planned_for_date < today &&
-          t.status !== 'done',
+          t.effective_status !== 'done',
       )
       .sort((a, b) => {
         // Newest planned date first, then by priority-as-tiebreaker.
@@ -105,7 +105,7 @@ export function RolloverPromptModal() {
                     type="checkbox"
                     checked={checked}
                     onChange={() => toggle(t.id)}
-                    className="w-4 h-4 accent-[#8b5cf6] cursor-pointer"
+                    className="w-4 h-4 accent-[#1a1a2e] cursor-pointer"
                   />
                   <div className="flex-1 min-w-0">
                     <div className="text-[13px] font-bold text-[#1a1a2e] truncate">
@@ -134,7 +134,7 @@ export function RolloverPromptModal() {
               </button>
               <button
                 onClick={handleConfirm}
-                className="px-4 py-2 rounded-lg bg-[#8b5cf6] text-white border-0 text-[13px] font-bold cursor-pointer"
+                className="px-4 py-2 rounded-lg bg-[#1a1a2e] text-white border-0 text-[13px] font-bold cursor-pointer"
                 disabled={selected.size === 0}
                 style={{ opacity: selected.size === 0 ? 0.5 : 1 }}
               >

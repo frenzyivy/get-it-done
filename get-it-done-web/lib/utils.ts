@@ -1,4 +1,4 @@
-import type { SubtaskType } from '@/types';
+import type { SubtaskType, TaskType } from '@/types';
 
 export function fmt(secs: number): string {
   const h = Math.floor(secs / 3600);
@@ -22,6 +22,19 @@ export function getProgress(subtasks: SubtaskType[] | undefined): number {
   if (!subtasks || subtasks.length === 0) return 0;
   const done = subtasks.filter((s) => s.is_done).length;
   return Math.round((done / subtasks.length) * 100);
+}
+
+// Spec Change #1 — the italic "why is this here?" line under in-progress
+// task cards. Reads from the task's snapshot fields; doesn't need active
+// session info because total_time_seconds is the persisted truth.
+export function whyInProgressLine(task: TaskType): string {
+  const subsWithTime = task.subtasks.filter((s) => s.total_time_seconds > 0).length;
+  if (task.subtasks.length > 0 && subsWithTime > 0) {
+    return `↳ In Progress — ${subsWithTime} of ${task.subtasks.length} subtask${
+      task.subtasks.length === 1 ? '' : 's'
+    } ha${subsWithTime === 1 ? 's' : 've'} time logged`;
+  }
+  return `↳ In Progress — ${fmtShort(task.total_time_seconds)} of work logged on this task`;
 }
 
 export function fmtDueDate(iso: string): string {

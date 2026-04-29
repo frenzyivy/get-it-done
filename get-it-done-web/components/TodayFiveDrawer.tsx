@@ -18,7 +18,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { useStore } from '@/lib/store';
 import { todayISO } from '@/lib/utils';
-import type { Status, TaskType } from '@/types';
+import type { TaskType } from '@/types';
 
 // "Today's 5" — drawer that lists the user's picks for today. Top 5 by
 // sort_order are "today's 5"; anything beyond sits in a waiting list that the
@@ -57,13 +57,16 @@ export function TodayFiveDrawer({ onClose }: Props) {
     [tasks, today],
   );
 
-  const completed = planned.slice(0, DAILY_CAP).filter((t) => t.status === 'done').length;
+  const completed = planned.slice(0, DAILY_CAP).filter((t) => t.effective_status === 'done').length;
 
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const handleStatusToggle = async (t: TaskType) => {
-    const next: Status = t.status === 'done' ? 'in_progress' : 'done';
-    await updateTask(t.id, { status: next });
+    const isCurrentlyDone = t.effective_status === 'done';
+    await updateTask(t.id, {
+      status: isCurrentlyDone ? 'in_progress' : 'done',  // legacy column, kept for mobile
+      completed_at: isCurrentlyDone ? null : new Date().toISOString(),
+    });
   };
 
   const handleRemove = async (t: TaskType) => {
@@ -162,7 +165,7 @@ export function TodayFiveDrawer({ onClose }: Props) {
             <div className="mt-2">
               <button
                 onClick={() => setPickerOpen((v) => !v)}
-                className="w-full border-[1.5px] border-dashed border-[#c4b5fd] bg-[rgba(139,92,246,0.04)] text-[#8b5cf6] text-[13px] font-bold px-3 py-2 rounded-lg cursor-pointer hover:bg-[rgba(139,92,246,0.08)]"
+                className="w-full border-[1.5px] border-dashed border-[#9ca3af] bg-[rgba(0,0,0,0.04)] text-[#1a1a2e] text-[13px] font-bold px-3 py-2 rounded-lg cursor-pointer hover:bg-[rgba(0,0,0,0.08)]"
               >
                 + Add a task to today ({DAILY_CAP - planned.length} slot
                 {DAILY_CAP - planned.length === 1 ? '' : 's'} left)
@@ -232,17 +235,17 @@ function SortableTaskRow({
           onClick={onToggle}
           className="w-[20px] h-[20px] rounded-[6px] flex items-center justify-center text-white text-xs shrink-0 transition-all cursor-pointer"
           style={{
-            border: task.status === 'done' ? 'none' : '2px solid #ccc',
-            background: task.status === 'done' ? '#10b981' : 'transparent',
+            border: task.effective_status === 'done' ? 'none' : '2px solid #ccc',
+            background: task.effective_status === 'done' ? '#10b981' : 'transparent',
           }}
-          title={task.status === 'done' ? 'Mark as in progress' : 'Mark as done'}
-          aria-label={task.status === 'done' ? 'Mark as in progress' : 'Mark as done'}
+          title={task.effective_status === 'done' ? 'Mark as in progress' : 'Mark as done'}
+          aria-label={task.effective_status === 'done' ? 'Mark as in progress' : 'Mark as done'}
         >
-          {task.status === 'done' ? '✓' : ''}
+          {task.effective_status === 'done' ? '✓' : ''}
         </button>
         <span
           className={`flex-1 text-[13px] truncate ${
-            task.status === 'done' ? 'line-through text-[#aaa]' : 'text-[#1a1a2e]'
+            task.effective_status === 'done' ? 'line-through text-[#aaa]' : 'text-[#1a1a2e]'
           } ${isInTopFive ? 'font-bold' : 'text-[#666]'}`}
           style={{ background: isInTopFive ? 'transparent' : '#fafafa' }}
         >
@@ -286,7 +289,7 @@ function TaskPicker({
         .filter(
           (t) =>
             t.planned_for_date !== excludeDate &&
-            t.status !== 'done' &&
+            t.effective_status !== 'done' &&
             t.title.toLowerCase().includes(query.toLowerCase()),
         )
         .slice()

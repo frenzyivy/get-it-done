@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import Animated, {
   Easing,
@@ -8,13 +7,12 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { useTheme } from 'react-native-paper';
 import { useStore } from '@/lib/store';
 import { useLiveTimer } from '@/lib/useLiveTimer';
 import { useUI } from '@/lib/ui-context';
 import { fmtShort, isToday } from '@/lib/utils';
-import { type as M3Type } from '@/lib/theme';
 import { hapticLight, hapticSuccess } from '@/lib/haptics';
+import { TODAY_COLORS, TODAY_FONT } from './today/palette';
 import type { Priority, Status, TaskType } from '@/types';
 
 interface Props {
@@ -26,16 +24,27 @@ type Rail = 'HIGH' | 'MED' | 'LOW';
 const railFor = (p: Priority): Rail =>
   p === 'urgent' || p === 'high' ? 'HIGH' : p === 'medium' ? 'MED' : 'LOW';
 
+const RAIL_COLOR: Record<Rail, string> = {
+  HIGH: TODAY_COLORS.red,
+  MED: TODAY_COLORS.yellow,
+  LOW: TODAY_COLORS.teal,
+};
+
+const PRI_PILL = {
+  HIGH: { bg: TODAY_COLORS.redTint, fg: TODAY_COLORS.red, label: 'High' },
+  MED: { bg: TODAY_COLORS.yellowTint, fg: '#A16207', label: 'Medium' },
+  LOW: { bg: TODAY_COLORS.tealTint, fg: TODAY_COLORS.teal, label: 'Low' },
+} as const;
+
+function formatDue(iso: string): string {
+  if (isToday(iso)) return 'Today';
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+}
+
 export function TaskItem({ task }: Props) {
-  const theme = useTheme();
-  const c = theme.colors;
-  const mono = { fontVariant: ['tabular-nums'] as ['tabular-nums'] };
-
-  const [open, setOpen] = useState(false);
-
   const tags = useStore((s) => s.tags);
   const updateTask = useStore((s) => s.updateTask);
-  const toggleSubtask = useStore((s) => s.toggleSubtask);
   const activeSessions = useStore((s) => s.activeSessions);
   const startTrackingTask = useStore((s) => s.startTrackingTask);
   const stopSession = useStore((s) => s.stopSession);
@@ -50,39 +59,30 @@ export function TaskItem({ task }: Props) {
   const isTrackingThisTask = Boolean(trackingTaskSession);
   const isTrackingThisCard = Boolean(trackingAnyOnTask);
 
-  const done = task.status === 'done';
+  const done = task.effective_status === 'done';
   const rail = railFor(task.priority);
-  const railColor =
-    rail === 'HIGH' ? c.error : rail === 'MED' ? c.tertiary : c.outline;
+  const railColor = RAIL_COLOR[rail];
+  const priPill =
+    task.priority === 'urgent'
+      ? { ...PRI_PILL.HIGH, label: 'Urgent' }
+      : PRI_PILL[rail];
 
   const invested = task.total_time_seconds + (isTrackingThisCard ? liveElapsed : 0);
   const est = task.estimated_seconds ?? 0;
-  const estMinutes = est > 0 ? Math.round(est / 60) : 0;
   const investedMin = Math.round(invested / 60);
-
-  let investedColor: string = c.onSurfaceVariant;
-  if (est > 0) {
-    if (invested > est * 1.5) investedColor = c.error;
-    else if (invested > est) investedColor = c.tertiary;
-  }
+  const estMinutes = est > 0 ? Math.round(est / 60) : 0;
 
   const taskTags = task.tag_ids
     .map((id) => tags.find((t) => t.id === id))
     .filter((t): t is NonNullable<typeof t> => Boolean(t));
   const firstTag = taskTags[0];
 
-  const dueIsToday = isToday(task.due_date);
-  const dueLabel = task.due_date
-    ? dueIsToday
-      ? 'Today'
-      : new Date(task.due_date).toLocaleDateString('en-IN', {
-          day: 'numeric',
-          month: 'short',
-        })
-    : null;
+  const dueIsToday = task.due_date ? isToday(task.due_date) : false;
+  const dueLabel = task.due_date ? formatDue(task.due_date) : null;
 
   const doneCount = task.subtasks.filter((s) => s.is_done).length;
   const subCount = task.subtasks.length;
+  const subPct = subCount > 0 ? (doneCount / subCount) * 100 : 0;
 
   const checkScale = useSharedValue(1);
   const checkStyle = useAnimatedStyle(() => ({
@@ -91,7 +91,6 @@ export function TaskItem({ task }: Props) {
 
   const handleCheckbox = () => {
     const next: Status = done ? 'in_progress' : 'done';
-    // 150ms scale-bounce (0.9 → 1.0) per spec §6.
     checkScale.value = withSequence(
       withTiming(0.9, { duration: 75, easing: Easing.bezier(0.2, 0, 0, 1) }),
       withTiming(1, { duration: 75, easing: Easing.bezier(0.2, 0, 0, 1) }),
@@ -109,342 +108,281 @@ export function TaskItem({ task }: Props) {
     void startTrackingTask(task.id);
   };
 
-  const rowBg = isTrackingThisTask ? c.primaryContainer : 'transparent';
-  const titleColor = isTrackingThisTask
-    ? c.onPrimaryContainer
-    : done
-    ? c.onSurfaceVariant
-    : c.onSurface;
-
-  const a11yLabel = [
-    task.title,
-    `priority ${rail.toLowerCase()}`,
-    firstTag ? `tag ${firstTag.name}` : null,
-    dueLabel ? `due ${dueLabel}` : null,
-    invested > 0 ? `invested ${fmtShort(invested)}` : null,
-  ]
-    .filter(Boolean)
-    .join(', ');
+  // Investment overrun color on the meta-row "invested" text (preserved behavior).
+  let investedColor: string = TODAY_COLORS.ink3;
+  if (est > 0) {
+    if (invested > est * 1.5) investedColor = TODAY_COLORS.red;
+    else if (invested > est) investedColor = TODAY_COLORS.orange;
+  }
 
   return (
     <View
       accessible
-      accessibilityLabel={a11yLabel}
+      accessibilityLabel={[
+        task.title,
+        `priority ${priPill.label.toLowerCase()}`,
+        firstTag ? `tag ${firstTag.name}` : null,
+        dueLabel ? `due ${dueLabel}` : null,
+        invested > 0 ? `invested ${fmtShort(invested)}` : null,
+      ]
+        .filter(Boolean)
+        .join(', ')}
       style={{
-        position: 'relative',
+        marginHorizontal: 20,
+        marginBottom: 8,
+        backgroundColor: TODAY_COLORS.card,
+        borderWidth: 1,
+        borderColor: TODAY_COLORS.border,
+        borderRadius: 13,
         paddingVertical: 12,
-        paddingLeft: 20,
-        paddingRight: 8,
-        minHeight: 72,
-        backgroundColor: rowBg,
+        paddingLeft: 10,
+        paddingRight: 14,
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 10,
+        minHeight: 52,
       }}
     >
-      {/* Priority rail */}
+      {/* Priority rail — 3px */}
       <View
         style={{
-          position: 'absolute',
-          left: 0,
-          top: 12,
-          bottom: 12,
-          width: rail === 'HIGH' ? 4 : 3,
+          width: 3,
+          alignSelf: 'stretch',
+          borderRadius: 3,
           backgroundColor: railColor,
-          borderTopRightRadius: 2,
-          borderBottomRightRadius: 2,
+          minHeight: 28,
         }}
       />
 
-      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
-        {/* Checkbox — 24dp M3 */}
-        <Animated.View style={[{ marginTop: 2 }, checkStyle]}>
-          <Pressable
-            onPress={handleCheckbox}
-            hitSlop={8}
-            accessibilityRole="checkbox"
-            accessibilityState={{ checked: done }}
-            style={{
-              width: 24,
-              height: 24,
-              borderRadius: 2,
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderWidth: done ? 0 : 2,
-              borderColor: c.onSurfaceVariant,
-              backgroundColor: done ? c.primary : 'transparent',
-            }}
-          >
-            {done && (
-              <MaterialCommunityIcons name="check" size={18} color={c.onPrimary} />
-            )}
-          </Pressable>
-        </Animated.View>
-
-        {/* Content column */}
+      {/* Checkbox — 18×18 */}
+      <Animated.View style={[{ marginTop: 2 }, checkStyle]}>
         <Pressable
-          onPress={() => openEditTask(task.id)}
-          onLongPress={() => subCount > 0 && setOpen((v) => !v)}
-          style={{ flex: 1, minWidth: 0 }}
+          onPress={handleCheckbox}
+          hitSlop={8}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: done }}
+          style={{
+            width: 18,
+            height: 18,
+            borderRadius: 5,
+            borderWidth: done ? 0 : 1.5,
+            borderColor: TODAY_COLORS.border,
+            backgroundColor: done ? TODAY_COLORS.purple : TODAY_COLORS.card,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
         >
-          <Text
-            style={{
-              ...M3Type.bodyLarge,
-              color: titleColor,
-              textDecorationLine: done ? 'line-through' : 'none',
-            }}
-          >
-            {task.title}
-          </Text>
+          {done && (
+            <MaterialCommunityIcons name="check" size={12} color="#fff" />
+          )}
+        </Pressable>
+      </Animated.View>
 
-          {/* Meta row */}
+      {/* Body */}
+      <Pressable
+        onPress={() => openEditTask(task.id)}
+        style={{ flex: 1, minWidth: 0 }}
+      >
+        <Text
+          style={{
+            fontFamily: TODAY_FONT.medium,
+            fontSize: 13.5,
+            lineHeight: 19,
+            color: done ? TODAY_COLORS.ink3 : TODAY_COLORS.ink,
+            textDecorationLine: done ? 'line-through' : 'none',
+            marginBottom: 6,
+          }}
+        >
+          {task.title}
+        </Text>
+
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            rowGap: 4,
+            columnGap: 6,
+          }}
+        >
           <View
             style={{
               flexDirection: 'row',
-              flexWrap: 'wrap',
               alignItems: 'center',
-              marginTop: 8,
-              rowGap: 6,
-              columnGap: 6,
+              gap: 4,
+              paddingHorizontal: 7,
+              paddingVertical: 2,
+              borderRadius: 5,
+              backgroundColor: priPill.bg,
             }}
           >
-            {/* Priority chip — hidden when LOW */}
-            {rail !== 'LOW' && (
-              <View
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 6,
-                  paddingHorizontal: 8,
-                  height: 24,
-                  borderRadius: 8,
-                  borderWidth: 1,
-                  borderColor: c.outlineVariant,
-                }}
-              >
-                <View
-                  style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: 3,
-                    backgroundColor: railColor,
-                  }}
-                />
-                <Text style={{ ...M3Type.bodyMedium, color: c.onSurfaceVariant }}>
-                  {rail === 'HIGH'
-                    ? task.priority === 'urgent'
-                      ? 'Urgent'
-                      : 'High'
-                    : 'Medium'}
-                </Text>
-              </View>
-            )}
-
-            {/* Tag chip */}
-            {firstTag && (
-              <View
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 6,
-                  paddingHorizontal: 8,
-                  height: 24,
-                  borderRadius: 8,
-                  borderWidth: 1,
-                  borderColor: c.outlineVariant,
-                }}
-              >
-                <View
-                  style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: 4,
-                    backgroundColor: firstTag.color,
-                  }}
-                />
-                <Text style={{ ...M3Type.bodyMedium, color: c.onSurfaceVariant }}>
-                  {firstTag.name}
-                </Text>
-              </View>
-            )}
-
-            {/* Due — inline text with today icon */}
-            {dueLabel && (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                <MaterialCommunityIcons
-                  name="calendar-today"
-                  size={14}
-                  color={dueIsToday ? c.error : c.onSurfaceVariant}
-                />
-                <Text
-                  style={{
-                    ...M3Type.bodyMedium,
-                    color: dueIsToday ? c.error : c.onSurfaceVariant,
-                  }}
-                >
-                  {dueLabel}
-                </Text>
-              </View>
-            )}
-
-            {/* Invested — Roboto Mono labelMedium */}
-            {invested > 0 && (
-              <Text
-                style={{
-                  ...M3Type.labelMedium,
-                  ...mono,
-                  color: investedColor,
-                }}
-              >
-                {estMinutes > 0
-                  ? `${investedMin}m / ${estMinutes}m`
-                  : `${fmtShort(invested)}`}
-              </Text>
-            )}
-
-            {/* Subtask disclosure */}
-            {subCount > 0 && (
-              <Pressable
-                onPress={() => setOpen((v) => !v)}
-                hitSlop={8}
-                accessibilityRole="button"
-                accessibilityState={{ expanded: open }}
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 2,
-                  height: 24,
-                  paddingHorizontal: 4,
-                }}
-              >
-                <MaterialCommunityIcons
-                  name={open ? 'chevron-up' : 'chevron-down'}
-                  size={18}
-                  color={c.onSurfaceVariant}
-                />
-                <Text style={{ ...M3Type.bodyMedium, color: c.onSurfaceVariant }}>
-                  {doneCount}/{subCount}
-                </Text>
-              </Pressable>
-            )}
+            <View
+              style={{
+                width: 5,
+                height: 5,
+                borderRadius: 2.5,
+                backgroundColor: railColor,
+              }}
+            />
+            <Text
+              style={{
+                fontFamily: TODAY_FONT.bold,
+                fontSize: 10,
+                color: priPill.fg,
+              }}
+            >
+              {priPill.label}
+            </Text>
           </View>
 
-          {/* Subtask list */}
-          {open && subCount > 0 && (
-            <View style={{ marginTop: 8, gap: 8 }}>
-              {task.subtasks.map((s) => {
-                const runningForThisSub = activeSessions.find(
-                  (x) => x.subtask_id === s.id,
-                );
-                const isTrackingThisSub = Boolean(runningForThisSub);
-                return (
-                  <View
-                    key={s.id}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: 10,
-                      paddingLeft: isTrackingThisSub ? 7 : 0,
-                      borderLeftWidth: isTrackingThisSub ? 3 : 0,
-                      borderLeftColor: c.primary,
-                    }}
-                  >
-                    <Pressable
-                      onPress={() => void toggleSubtask(task.id, s.id)}
-                      accessibilityRole="checkbox"
-                      accessibilityState={{ checked: s.is_done }}
-                      hitSlop={6}
-                      style={{
-                        width: 16,
-                        height: 16,
-                        borderRadius: 2,
-                        borderWidth: s.is_done ? 0 : 1.5,
-                        borderColor: c.onSurfaceVariant,
-                        backgroundColor: s.is_done ? c.primary : 'transparent',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}
-                    >
-                      {s.is_done && (
-                        <MaterialCommunityIcons
-                          name="check"
-                          size={12}
-                          color={c.onPrimary}
-                        />
-                      )}
-                    </Pressable>
-                    <Pressable
-                      onPress={() => void toggleSubtask(task.id, s.id)}
-                      style={{ flex: 1 }}
-                    >
-                      <Text
-                        style={{
-                          ...M3Type.bodyMedium,
-                          color: s.is_done ? c.onSurfaceVariant : c.onSurface,
-                          textDecorationLine: s.is_done ? 'line-through' : 'none',
-                        }}
-                      >
-                        {s.title}
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => {
-                        if (isTrackingThisSub && runningForThisSub) {
-                          void stopSession(runningForThisSub.id);
-                        } else {
-                          void startTrackingTask(task.id, s.id);
-                        }
-                      }}
-                      hitSlop={6}
-                      accessibilityRole="button"
-                      accessibilityLabel={
-                        isTrackingThisSub ? 'Stop subtask timer' : 'Start subtask timer'
-                      }
-                      style={{
-                        width: 28,
-                        height: 28,
-                        borderRadius: 14,
-                        backgroundColor: isTrackingThisSub
-                          ? c.primary
-                          : c.elevation.level2,
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}
-                    >
-                      <MaterialCommunityIcons
-                        name={isTrackingThisSub ? 'stop' : 'play'}
-                        size={14}
-                        color={isTrackingThisSub ? c.onPrimary : c.primary}
-                      />
-                    </Pressable>
-                  </View>
-                );
-              })}
+          {firstTag && (
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 4,
+                paddingHorizontal: 7,
+                paddingVertical: 2,
+                borderRadius: 5,
+                borderWidth: 1,
+                borderColor: TODAY_COLORS.border,
+              }}
+            >
+              <View
+                style={{
+                  width: 5,
+                  height: 5,
+                  borderRadius: 2.5,
+                  backgroundColor: firstTag.color,
+                }}
+              />
+              <Text
+                style={{
+                  fontFamily: TODAY_FONT.semibold,
+                  fontSize: 10,
+                  color: TODAY_COLORS.ink2,
+                }}
+              >
+                {firstTag.name}
+              </Text>
             </View>
           )}
-        </Pressable>
 
-        {/* Timer button — 40dp IconButton */}
-        <Pressable
-          onPress={handleTimerPress}
-          hitSlop={6}
-          accessibilityRole="button"
-          accessibilityLabel={isTrackingThisTask ? 'Pause timer' : 'Start timer'}
-          style={{
-            width: 40,
-            height: 40,
-            borderRadius: 20,
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderWidth: isTrackingThisTask ? 0 : 1,
-            borderColor: c.outline,
-            backgroundColor: isTrackingThisTask ? c.primary : 'transparent',
-          }}
-        >
-          <MaterialCommunityIcons
-            name={isTrackingThisTask ? 'pause' : 'play'}
-            size={20}
-            color={isTrackingThisTask ? c.onPrimary : c.onSurface}
-          />
-        </Pressable>
-      </View>
+          {est > 0 && (
+            <Text
+              style={{
+                fontFamily: TODAY_FONT.semibold,
+                fontSize: 10.5,
+                color: TODAY_COLORS.purpleStrong,
+              }}
+            >
+              {invested > 0
+                ? `${investedMin}m / ${estMinutes}m`
+                : `~${estMinutes}m`}
+            </Text>
+          )}
+
+          {est === 0 && invested > 0 && (
+            <Text
+              style={{
+                fontFamily: TODAY_FONT.semibold,
+                fontSize: 10.5,
+                color: investedColor,
+                fontVariant: ['tabular-nums'],
+              }}
+            >
+              {fmtShort(invested)}
+            </Text>
+          )}
+
+          {dueLabel && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+              <MaterialCommunityIcons
+                name="calendar-blank-outline"
+                size={12}
+                color={dueIsToday ? TODAY_COLORS.red : TODAY_COLORS.ink3}
+              />
+              <Text
+                style={{
+                  fontFamily: TODAY_FONT.semibold,
+                  fontSize: 10.5,
+                  color: dueIsToday ? TODAY_COLORS.red : TODAY_COLORS.ink3,
+                }}
+              >
+                {dueLabel}
+              </Text>
+            </View>
+          )}
+        </View>
+
+        {subCount > 0 && (
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 8,
+              marginTop: 8,
+            }}
+          >
+            <View
+              style={{
+                flex: 1,
+                height: 4,
+                backgroundColor: TODAY_COLORS.chipBg,
+                borderRadius: 2,
+                overflow: 'hidden',
+              }}
+            >
+              <View
+                style={{
+                  height: '100%',
+                  width: `${subPct}%`,
+                  backgroundColor: TODAY_COLORS.purple,
+                  borderRadius: 2,
+                }}
+              />
+            </View>
+            <Text
+              style={{
+                fontFamily: TODAY_FONT.bold,
+                fontSize: 10,
+                color: TODAY_COLORS.ink3,
+                fontVariant: ['tabular-nums'],
+              }}
+            >
+              {doneCount}/{subCount}
+            </Text>
+          </View>
+        )}
+      </Pressable>
+
+      {/* Play/Stop button — 32×32 round */}
+      <Pressable
+        onPress={handleTimerPress}
+        hitSlop={6}
+        accessibilityRole="button"
+        accessibilityLabel={isTrackingThisTask ? 'Stop timer' : 'Start timer'}
+        style={{
+          width: 32,
+          height: 32,
+          borderRadius: 16,
+          marginTop: 2,
+          borderWidth: isTrackingThisTask ? 0 : 1.5,
+          borderColor: TODAY_COLORS.border,
+          backgroundColor: isTrackingThisTask
+            ? TODAY_COLORS.purple
+            : TODAY_COLORS.card,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <MaterialCommunityIcons
+          name={isTrackingThisTask ? 'stop' : 'play'}
+          size={14}
+          color={isTrackingThisTask ? '#fff' : TODAY_COLORS.ink2}
+          style={!isTrackingThisTask ? { marginLeft: 2 } : undefined}
+        />
+      </Pressable>
     </View>
   );
 }

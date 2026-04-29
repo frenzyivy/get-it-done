@@ -1,24 +1,28 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useStore } from '@/lib/store';
+import { DailyProgressTab } from './insights/DailyProgressTab';
 import type {
   InsightsBucket,
   InsightsTagBucket,
   InsightsRange,
 } from '@/types';
 
-// Match the visual reference: lightweight palette, no chart library.
-const INK = '#1a1730';
+// Phase 6 step 18 — B&W reskin. Chrome and structure are strict black-on-grey
+// per the redesign palette. Category/project tint accents (`tintFromHex`) keep
+// the user-chosen hue because color is explicitly part of those data types
+// (matches the redesigned Board view's CategoryPill / ProjectBadge usage).
+const INK = '#1a1a2e';
 const INK_SOFT = '#5b5674';
-const INK_MUTE = '#8e89a8';
-const LINE = '#ece9f7';
-const LINE_SOFT = '#f2f0fa';
+const INK_MUTE = '#9ca3af';
+const LINE = '#e5e7eb';
+const LINE_SOFT = '#f3f4f6';
 const CARD = '#ffffff';
-const PRIMARY = '#7c5cff';
-const PRIMARY_SOFT = '#efeaff';
-const PRIMARY_DEEP = '#5a3fd8';
+const PRIMARY = '#1a1a2e';      // black accent replaces purple
+const PRIMARY_SOFT = '#f3f4f6'; // neutral soft replaces purple-soft
+const PRIMARY_DEEP = '#1a1a2e'; // collapses to black
 
 function fmtHM(secs: number): string {
   if (!secs || secs <= 0) return '0m';
@@ -716,6 +720,8 @@ function TagCategorySection() {
 
 // ---- Page shell ----------------------------------------------------------
 
+type InsightsTabId = 'time' | 'daily' | 'matrix';
+
 export function Insights() {
   const payload = useStore((s) => s.insightsPayload);
   const loading = useStore((s) => s.insightsLoading);
@@ -724,8 +730,15 @@ export function Insights() {
   const hasAnyTime = (payload?.summary.total_seconds ?? 0) > 0;
   const firstLoad = loading && !payload;
 
+  const [tab, setTab] = useState<InsightsTabId>('time');
+  const TABS: { id: InsightsTabId; label: string }[] = [
+    { id: 'time', label: 'Where your time went' },
+    { id: 'daily', label: 'Daily progress' },
+    { id: 'matrix', label: 'Category × Project matrix' },
+  ];
+
   return (
-    <div className="min-h-screen" style={{ background: '#f6f5ff', color: INK, fontSize: '14px', lineHeight: 1.5 }}>
+    <div className="min-h-screen" style={{ background: '#e8e8ea', color: INK, fontSize: '14px', lineHeight: 1.5 }}>
       <div className="max-w-[1120px] mx-auto px-8 pt-7 pb-20">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
@@ -734,7 +747,7 @@ export function Insights() {
             className="text-[24px] font-extrabold tracking-[-0.5px] inline-flex items-center gap-[10px]"
             style={{ color: INK }}
           >
-            <span style={{ color: '#f59e0b' }}>⚡</span> Get-it-done
+            <span style={{ color: INK }}>⚡</span> Get-it-done
           </Link>
           <div className="flex gap-2">
             <Link
@@ -782,7 +795,30 @@ export function Insights() {
           </span>
         </div>
 
-        <Hero />
+        {/* Sub-tabs (Phase 4 step 11) */}
+        <div
+          className="inline-flex rounded-[12px] p-1 mb-5 flex-wrap"
+          style={{ background: CARD, border: `1px solid ${LINE}` }}
+        >
+          {TABS.map((t) => {
+            const active = tab === t.id;
+            return (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                className="px-[14px] py-2 text-[12px] font-medium rounded-[9px] cursor-pointer border-0"
+                style={{
+                  background: active ? PRIMARY : 'transparent',
+                  color: active ? '#fff' : INK_SOFT,
+                }}
+              >
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {tab === 'time' && <Hero />}
 
         {err && (
           <div
@@ -796,14 +832,16 @@ export function Insights() {
         {payload?.missing_label_schema && (
           <div
             className="rounded-[12px] p-4 mb-4 text-[13px]"
-            style={{ background: PRIMARY_SOFT, color: PRIMARY_DEEP, border: `1px solid #d5cafe` }}
+            style={{ background: PRIMARY_SOFT, color: PRIMARY_DEEP, border: `1px solid ${LINE}` }}
           >
             Categories and projects aren’t set up in the database yet. Add them from the header
             on the board to start seeing category/project breakdowns here.
           </div>
         )}
 
-        {firstLoad ? (
+        {tab === 'daily' ? (
+          <DailyProgressTab />
+        ) : firstLoad ? (
           <div
             className="rounded-[14px] p-8 text-center text-[13px]"
             style={{ background: CARD, border: `1px solid ${LINE}`, color: INK_MUTE }}
@@ -822,6 +860,8 @@ export function Insights() {
               Track some time this week and this page will come alive.
             </div>
           </div>
+        ) : tab === 'matrix' ? (
+          <MatrixSection />
         ) : (
           <>
             <SummaryStats />

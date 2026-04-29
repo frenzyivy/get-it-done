@@ -1,0 +1,5516 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Get-it-done · Mono redesign</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    /* B&W palette */
+    --bg: #e8e8ea;
+    --bg-deep: #d4d4d8;
+    --paper: #f7f7f8;
+
+    --black: #0a0a0a;
+    --black-soft: #18181b;
+    --black-mute: #27272a;
+
+    --white: #ffffff;
+    --frost: rgba(255,255,255,.72);
+    --frost-strong: rgba(255,255,255,.88);
+    --frost-deep: rgba(255,255,255,.55);
+
+    --ink: #0a0a0a;
+    --ink-soft: #3f3f46;
+    --ink-mute: #71717a;
+    --ink-faint: #a1a1aa;
+    --ink-ghost: #d4d4d8;
+
+    --line: rgba(10,10,10,.08);
+    --line-strong: rgba(10,10,10,.14);
+    --line-on-dark: rgba(255,255,255,.1);
+    --line-on-dark-strong: rgba(255,255,255,.18);
+
+    /* B&W ONLY — no chromatic accents. Use weight + size + opacity for hierarchy */
+    --accent: #ffffff;
+    --accent-soft: rgba(255,255,255,.18);
+    --accent-on-light: #0a0a0a;
+
+    --serif: 'Inter', system-ui, sans-serif;
+    --sans: 'Inter', system-ui, sans-serif;
+    --mono: 'JetBrains Mono', monospace;
+
+    --r: 6px;
+    --r-md: 12px;
+    --r-lg: 20px;
+    --r-xl: 28px;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    font-family: var(--sans);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+
+  /* ambient light blobs behind everything */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: -200px;
+    background:
+      radial-gradient(600px circle at 15% 20%, rgba(255,255,255,.7), transparent 50%),
+      radial-gradient(800px circle at 85% 70%, rgba(200,200,200,.35), transparent 50%),
+      radial-gradient(500px circle at 50% 90%, rgba(220,220,220,.4), transparent 50%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.04 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+    pointer-events: none;
+    z-index: 1;
+    mix-blend-mode: overlay;
+  }
+  .app, .proto-nav { position: relative; z-index: 5; }
+
+  /* ============== PROTOTYPE NAV ============== */
+  .proto-nav {
+    background: var(--black);
+    color: var(--white);
+    padding: 12px 28px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    border-bottom: 1px solid #000;
+  }
+  .proto-nav .label {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,.5);
+    margin-right: 6px;
+  }
+  .proto-tab {
+    background: transparent;
+    border: 1px solid rgba(255,255,255,.14);
+    color: rgba(255,255,255,.85);
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-family: var(--sans);
+    font-size: 12px;
+    font-weight: 400;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .proto-tab:hover { border-color: rgba(255,255,255,.4); color: #fff; }
+  .proto-tab.active {
+    background: var(--white);
+    border-color: var(--white);
+    color: var(--black);
+    font-weight: 500;
+  }
+
+  /* ============== APP ============== */
+  .app {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 28px 28px 80px;
+  }
+
+  /* ============== GLASS CARD utility ============== */
+  .glass {
+    background: var(--frost);
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+    border: 1px solid rgba(255,255,255,.6);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.9),
+      0 1px 2px rgba(10,10,10,.04),
+      0 12px 32px rgba(10,10,10,.06);
+  }
+  .glass-dark {
+    background: var(--black);
+    color: var(--white);
+    border: 1px solid rgba(255,255,255,.06);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.08),
+      0 1px 2px rgba(0,0,0,.2),
+      0 12px 32px rgba(0,0,0,.18);
+  }
+
+  /* ============== HEADER ============== */
+  .header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 26px;
+    gap: 14px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 18px 10px 14px;
+    border-radius: 999px;
+  }
+  .brand-mark {
+    width: 32px; height: 32px;
+    background: var(--black);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-family: var(--sans);
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .brand-name {
+    font-family: var(--sans);
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    line-height: 1;
+  }
+  .brand-name em {
+    font-style: normal;
+    font-weight: 400;
+    color: var(--ink-soft);
+  }
+
+  .header-pills {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-left: auto;
+  }
+  .pill {
+    padding: 9px 18px;
+    border-radius: 999px;
+    font-family: var(--sans);
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--ink-soft);
+    cursor: pointer;
+    border: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    transition: all .15s;
+    background: var(--frost);
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+    border: 1px solid rgba(255,255,255,.6);
+  }
+  .pill:hover { background: var(--frost-strong); }
+  .pill .num {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-mute);
+    font-weight: 500;
+  }
+  .pill.dark {
+    background: var(--black);
+    color: var(--white);
+    border-color: rgba(255,255,255,.06);
+  }
+  .pill.dark:hover { background: var(--black-soft); }
+  .pill.dark .num { color: rgba(255,255,255,.55); }
+  .pill.bell {
+    width: 40px; height: 40px;
+    padding: 0;
+    justify-content: center;
+    position: relative;
+  }
+  .pill.bell::after {
+    content: '16';
+    position: absolute;
+    top: -2px; right: -2px;
+    background: var(--black);
+    color: #fff;
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 600;
+    padding: 1px 5px;
+    border-radius: 999px;
+  }
+  .pill.search {
+    flex: 1;
+    max-width: 280px;
+    color: var(--ink-mute);
+    justify-content: flex-start;
+    padding: 9px 18px;
+  }
+
+  /* ============== TITLE ROW ============== */
+  .title-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 24px;
+    margin-bottom: 28px;
+  }
+  .title-row h1 {
+    font-family: var(--sans);
+    font-size: 56px;
+    font-weight: 700;
+    letter-spacing: -0.035em;
+    line-height: 0.95;
+    margin: 0;
+  }
+  .title-row h1 em {
+    font-style: normal;
+    font-weight: 300;
+    color: var(--ink-mute);
+  }
+  .title-meta {
+    margin-left: auto;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+  .title-date {
+    padding: 8px 14px;
+    border-radius: var(--r-md);
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-soft);
+    letter-spacing: .04em;
+    background: var(--frost);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255,255,255,.6);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .title-date .live-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--black);
+    box-shadow: 0 0 0 4px rgba(0,0,0,.12);
+    animation: live 1.6s ease-in-out infinite;
+  }
+  @keyframes live {
+    0%, 100% { box-shadow: 0 0 0 4px rgba(0,0,0,.12); }
+    50% { box-shadow: 0 0 0 6px rgba(0,0,0,.05); }
+  }
+
+  /* ============== NOW TRACKING BANNER ============== */
+  .now-tracking {
+    background: var(--black);
+    color: #fff;
+    border-radius: var(--r-xl);
+    padding: 18px 24px;
+    margin-bottom: 14px;
+    display: grid;
+    grid-template-columns: auto 1fr auto auto;
+    align-items: center;
+    gap: 24px;
+    border: 1px solid rgba(255,255,255,.06);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.08),
+      0 12px 36px rgba(0,0,0,.18);
+    position: relative;
+    overflow: hidden;
+  }
+  /* subtle moving gradient sheen behind the running timer */
+  .now-tracking::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(110deg, transparent 30%, rgba(255,255,255,.04) 50%, transparent 70%);
+    background-size: 200% 100%;
+    animation: sheen 4s linear infinite;
+    pointer-events: none;
+  }
+  @keyframes sheen {
+    from { background-position: 200% 0; }
+    to { background-position: -200% 0; }
+  }
+
+  .nt-status {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  .nt-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: .25em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,.55);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .nt-pulse {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 0 0 4px rgba(255,255,255,.18);
+    animation: nt-live 1.4s ease-in-out infinite;
+  }
+  @keyframes nt-live {
+    0%, 100% {
+      box-shadow: 0 0 0 4px rgba(255,255,255,.2);
+      opacity: 1;
+    }
+    50% {
+      box-shadow: 0 0 0 7px rgba(255,255,255,.05);
+      opacity: .85;
+    }
+  }
+  .nt-task-name {
+    font-family: var(--sans);
+    font-size: 15px;
+    font-weight: 600;
+    color: #fff;
+    letter-spacing: -.005em;
+    line-height: 1.3;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .nt-task-meta {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: .12em;
+    color: rgba(255,255,255,.4);
+    text-transform: uppercase;
+    margin-top: 2px;
+  }
+  .nt-task-meta strong { color: rgba(255,255,255,.7); font-weight: 500; }
+
+  .nt-spacer { /* takes the 1fr column */ }
+
+  /* the big timer */
+  .nt-timer {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+  }
+  .nt-time {
+    font-family: var(--mono);
+    font-size: 32px;
+    font-weight: 600;
+    letter-spacing: -.02em;
+    line-height: 1;
+    color: #fff;
+    font-variant-numeric: tabular-nums;
+  }
+  .nt-time .ms {
+    font-size: 18px;
+    color: rgba(255,255,255,.5);
+    font-weight: 400;
+  }
+  .nt-session {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: .15em;
+    color: rgba(255,255,255,.45);
+    text-transform: uppercase;
+  }
+
+  /* control buttons on the banner */
+  .nt-controls {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .nt-btn {
+    background: rgba(255,255,255,.08);
+    border: 1px solid rgba(255,255,255,.1);
+    color: #fff;
+    padding: 9px 14px;
+    border-radius: 999px;
+    font-family: var(--sans);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all .15s;
+    letter-spacing: .005em;
+  }
+  .nt-btn:hover {
+    background: rgba(255,255,255,.14);
+    border-color: rgba(255,255,255,.2);
+  }
+  .nt-btn .icon { font-size: 11px; }
+  .nt-btn.focus { background: #fff; color: var(--black); border-color: #fff; font-weight: 600; }
+  .nt-btn.focus:hover { background: rgba(255,255,255,.92); }
+  .nt-btn.stop { color: rgba(255,255,255,.7); }
+  .nt-btn.stop:hover { color: #fff; background: rgba(255,255,255,.1); }
+
+  /* ============== TASK TIME REDESIGN ============== */
+  /* Replace the small grey "task-time" pill with a more prominent total-time block */
+  .task-total-time {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    margin-left: 8px;
+    flex-shrink: 0;
+    padding-left: 12px;
+    border-left: 1px solid var(--line);
+  }
+  .task.active-tracking .task-total-time {
+    border-left-color: rgba(255,255,255,.12);
+  }
+  .task-total-time .v {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink);
+    letter-spacing: -.01em;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+  .task-total-time .v.zero { color: var(--ink-faint); font-weight: 400; }
+  .task-total-time .lbl {
+    font-family: var(--mono);
+    font-size: 8px;
+    letter-spacing: .15em;
+    color: var(--ink-mute);
+    text-transform: uppercase;
+  }
+  .task.active-tracking .task-total-time .v { color: #fff; }
+  .task.active-tracking .task-total-time .v.zero { color: rgba(255,255,255,.4); }
+  .task.active-tracking .task-total-time .lbl { color: rgba(255,255,255,.5); }
+
+  /* When a task is currently running, show a tiny live ring next to the time */
+  .task-total-time.live .v::before {
+    content: '';
+    display: inline-block;
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: #fff;
+    margin-right: 6px;
+    box-shadow: 0 0 0 3px rgba(255,255,255,.18);
+    animation: nt-live 1.4s ease-in-out infinite;
+    vertical-align: middle;
+  }
+
+  /* SUBTASK TIME REDESIGN */
+  /* Subtasks now use a clean mono number aligned right + a "n of total" relationship */
+  .subtask-time {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .subtask-time .v {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--ink);
+    letter-spacing: -.005em;
+    font-variant-numeric: tabular-nums;
+  }
+  .subtask-time .v.zero { color: var(--ink-faint); font-weight: 400; }
+  .task.active-tracking .subtask-time .v { color: #fff; }
+  .task.active-tracking .subtask-time .v.zero { color: rgba(255,255,255,.4); }
+  .subtask-time .v.live::before {
+    content: '';
+    display: inline-block;
+    width: 4px; height: 4px;
+    border-radius: 50%;
+    background: var(--black);
+    margin-right: 4px;
+    box-shadow: 0 0 0 2px rgba(0,0,0,.15);
+    animation: nt-live 1.4s ease-in-out infinite;
+    vertical-align: middle;
+  }
+  .task.active-tracking .subtask-time .v.live::before {
+    background: #fff;
+    box-shadow: 0 0 0 2px rgba(255,255,255,.18);
+  }
+
+  /* Roll-up bar between task header and subtask list */
+  .task-time-rollup {
+    margin-top: 14px;
+    margin-left: 32px;
+    padding: 10px 14px;
+    background: rgba(0,0,0,.03);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .task.active-tracking .task-time-rollup {
+    background: rgba(255,255,255,.05);
+  }
+  .task-time-rollup .lbl {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: .15em;
+    color: var(--ink-mute);
+    text-transform: uppercase;
+  }
+  .task.active-tracking .task-time-rollup .lbl { color: rgba(255,255,255,.5); }
+  .task-time-rollup .breakdown {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-soft);
+  }
+  .task.active-tracking .task-time-rollup .breakdown { color: rgba(255,255,255,.7); }
+  .task-time-rollup .breakdown .seg {
+    height: 4px;
+    background: var(--ink);
+    border-radius: 999px;
+  }
+  .task.active-tracking .task-time-rollup .breakdown .seg { background: #fff; }
+  .task-time-rollup .total {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink);
+    letter-spacing: -.01em;
+  }
+  .task.active-tracking .task-time-rollup .total { color: #fff; }
+
+  /* ============== QUICK-ADD COMMAND BAR (Ctrl+K) ============== */
+  .qa-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 16px;
+    border-radius: 999px;
+    font-family: var(--sans);
+    font-size: 13px;
+    font-weight: 500;
+    background: var(--black);
+    color: #fff;
+    border: 1px solid var(--black);
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .qa-trigger:hover { background: var(--black-soft); }
+  .qa-trigger .qa-plus {
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    background: rgba(255,255,255,.15);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 11px;
+  }
+  .qa-trigger .qa-kbd {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: rgba(255,255,255,.55);
+    background: rgba(255,255,255,.08);
+    padding: 2px 7px;
+    border-radius: 4px;
+    letter-spacing: .04em;
+    margin-left: 4px;
+  }
+
+  /* Backdrop overlay */
+  .qa-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(10,10,10,.45);
+    backdrop-filter: blur(8px) saturate(120%);
+    -webkit-backdrop-filter: blur(8px) saturate(120%);
+    z-index: 200;
+    display: none;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 14vh 20px 20px;
+    animation: qa-fade-in .15s ease;
+  }
+  .qa-backdrop.show { display: flex; }
+  @keyframes qa-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  /* The floating bar/card */
+  .qa-card {
+    background: rgba(15,15,17,.85);
+    backdrop-filter: blur(40px) saturate(160%);
+    -webkit-backdrop-filter: blur(40px) saturate(160%);
+    border: 1px solid rgba(255,255,255,.1);
+    border-radius: 20px;
+    padding: 22px;
+    width: 100%;
+    max-width: 620px;
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.08),
+      0 24px 64px rgba(0,0,0,.5);
+    color: #fff;
+    animation: qa-slide-up .22s cubic-bezier(.2,.8,.2,1);
+  }
+  @keyframes qa-slide-up {
+    from {
+      opacity: 0;
+      transform: translateY(-12px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* Header bar inside card */
+  .qa-card-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid rgba(255,255,255,.08);
+    margin-bottom: 16px;
+  }
+  .qa-card-head .qa-prefix {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,.55);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .qa-card-head .qa-prefix kbd {
+    background: rgba(255,255,255,.08);
+    border: 1px solid rgba(255,255,255,.12);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 500;
+    color: #fff;
+    letter-spacing: 0;
+  }
+  .qa-card-head .qa-status {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: rgba(255,255,255,.4);
+    letter-spacing: .08em;
+  }
+  .qa-card-head .qa-status .esc {
+    background: rgba(255,255,255,.08);
+    border-radius: 3px;
+    padding: 1px 5px;
+    margin-right: 4px;
+  }
+
+  /* The input itself */
+  .qa-input-wrap {
+    position: relative;
+    margin-bottom: 16px;
+  }
+  .qa-input {
+    width: 100%;
+    background: transparent;
+    border: 0;
+    color: #fff;
+    font-family: var(--sans);
+    font-size: 18px;
+    font-weight: 500;
+    padding: 6px 0;
+    outline: none;
+    letter-spacing: -.01em;
+  }
+  .qa-input::placeholder {
+    color: rgba(255,255,255,.3);
+    font-weight: 400;
+  }
+
+  /* Detected chips row */
+  .qa-detected {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 14px;
+    min-height: 28px;
+    align-items: center;
+  }
+  .qa-detected .qa-empty {
+    font-family: var(--sans);
+    font-size: 12px;
+    color: rgba(255,255,255,.35);
+  }
+  .qa-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px 4px 8px;
+    border-radius: 999px;
+    background: rgba(255,255,255,.1);
+    border: 1px solid rgba(255,255,255,.14);
+    font-family: var(--sans);
+    font-size: 12px;
+    font-weight: 500;
+    color: #fff;
+    animation: qa-chip-in .2s cubic-bezier(.2,.8,.2,1);
+  }
+  @keyframes qa-chip-in {
+    from { opacity: 0; transform: scale(.85); }
+    to { opacity: 1; transform: scale(1); }
+  }
+  .qa-chip .qa-chip-key {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,.55);
+  }
+  .qa-chip.priority-urgent { background: #fff; color: var(--black); border-color: #fff; }
+  .qa-chip.priority-urgent .qa-chip-key { color: rgba(0,0,0,.55); }
+  .qa-chip.inherited::before {
+    content: '↪';
+    color: rgba(255,255,255,.7);
+    font-weight: 700;
+    margin-right: -2px;
+  }
+  .qa-chip.priority-urgent.inherited::before { color: rgba(0,0,0,.6); }
+
+  /* Title preview line */
+  .qa-title-preview {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    padding: 12px 14px;
+    background: rgba(255,255,255,.04);
+    border-radius: 10px;
+    margin-bottom: 16px;
+  }
+  .qa-title-preview .lbl {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,.4);
+    flex-shrink: 0;
+  }
+  .qa-title-preview .title {
+    font-family: var(--sans);
+    font-size: 14px;
+    font-weight: 500;
+    color: #fff;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .qa-title-preview .title.empty {
+    color: rgba(255,255,255,.25);
+    font-style: italic;
+  }
+
+  /* Subtasks preview */
+  .qa-subtasks-preview {
+    margin-bottom: 16px;
+    padding: 10px 14px;
+    background: rgba(255,255,255,.04);
+    border-left: 2px solid rgba(255,255,255,.2);
+    border-radius: 0 8px 8px 0;
+  }
+  .qa-subtasks-preview .lbl {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,.4);
+    margin-bottom: 6px;
+  }
+  .qa-subtasks-preview ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .qa-subtasks-preview li {
+    font-size: 13px;
+    color: rgba(255,255,255,.85);
+    padding: 3px 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .qa-subtasks-preview li::before {
+    content: '○';
+    color: rgba(255,255,255,.4);
+    font-size: 12px;
+  }
+
+  /* Syntax help */
+  .qa-help {
+    border-top: 1px solid rgba(255,255,255,.06);
+    padding-top: 14px;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px 18px;
+  }
+  .qa-help .qa-help-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    font-size: 11px;
+    color: rgba(255,255,255,.55);
+    font-family: var(--sans);
+  }
+  .qa-help code {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: #fff;
+    background: rgba(255,255,255,.08);
+    padding: 1px 6px;
+    border-radius: 3px;
+    letter-spacing: .02em;
+    flex-shrink: 0;
+    min-width: 56px;
+    text-align: center;
+  }
+
+  /* Footer with submit hints */
+  .qa-footer {
+    border-top: 1px solid rgba(255,255,255,.08);
+    margin-top: 14px;
+    padding-top: 14px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .qa-footer .submit-hint {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: rgba(255,255,255,.55);
+    letter-spacing: .04em;
+  }
+  .qa-footer .submit-hint kbd {
+    background: rgba(255,255,255,.1);
+    border: 1px solid rgba(255,255,255,.14);
+    border-radius: 4px;
+    padding: 2px 6px;
+    color: #fff;
+    font-weight: 500;
+  }
+  .qa-footer .submit-hint.primary kbd {
+    background: #fff;
+    color: var(--black);
+    border-color: #fff;
+    font-weight: 600;
+  }
+  .qa-footer .qa-success {
+    margin-left: auto;
+    font-family: var(--sans);
+    font-size: 12px;
+    color: rgba(255,255,255,.5);
+    font-style: italic;
+    opacity: 0;
+    transition: opacity .25s;
+  }
+  .qa-footer .qa-success.show {
+    opacity: 1;
+    color: #fff;
+    font-style: normal;
+  }
+  .qa-footer .qa-success::before {
+    content: '✓ ';
+    color: #fff;
+    font-weight: 700;
+    margin-right: 4px;
+  }
+
+  /* When filters are active, show inheritance banner */
+  .qa-filter-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.06);
+    border-radius: 8px;
+    margin-bottom: 12px;
+    font-family: var(--sans);
+    font-size: 11px;
+    color: rgba(255,255,255,.55);
+  }
+  .qa-filter-banner strong {
+    color: #fff;
+    font-weight: 500;
+  }
+  .qa-filter-banner .qa-fb-mark {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: .15em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,.4);
+    background: rgba(255,255,255,.06);
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+
+  /* ============== TODAY HERO — split black + white cards ============== */
+  .today-grid {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr 1fr;
+    gap: 14px;
+    margin-bottom: 26px;
+  }
+  .today-card {
+    border-radius: var(--r-xl);
+    padding: 22px 24px;
+    min-height: 140px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  .today-card .label {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    margin-bottom: 0;
+  }
+  .today-card.dark .label { color: rgba(255,255,255,.5); }
+
+  .today-card .big {
+    font-family: var(--sans);
+    font-size: 56px;
+    font-weight: 700;
+    letter-spacing: -0.045em;
+    line-height: 0.85;
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+  }
+  .today-card .big .of {
+    font-size: 20px;
+    font-weight: 300;
+    color: var(--ink-mute);
+  }
+  .today-card.dark .big .of { color: rgba(255,255,255,.45); }
+  .today-card .progress-track {
+    height: 3px;
+    background: var(--line-strong);
+    border-radius: 999px;
+    overflow: hidden;
+    margin-top: 14px;
+  }
+  .today-card .progress-track .fill {
+    height: 100%;
+    background: var(--black);
+    width: 20%;
+    border-radius: 999px;
+  }
+  .today-card.dark .progress-track { background: rgba(255,255,255,.12); }
+  .today-card.dark .progress-track .fill { background: var(--accent); }
+
+  .today-stat-block {
+    display: flex;
+    align-items: flex-end;
+    gap: 10px;
+  }
+  .today-stat-block .v {
+    font-family: var(--sans);
+    font-size: 44px;
+    font-weight: 400;
+    letter-spacing: -0.03em;
+    line-height: 0.9;
+  }
+  .today-stat-block .v em {  }
+  .streak-num em { font-style: normal; color: var(--black); font-weight: 700; }
+  .today-card.dark .v { color: #fff; }
+
+  /* tiny inline sparkline */
+  .spark {
+    height: 28px;
+    width: 100%;
+    margin-top: 10px;
+  }
+
+  /* ============== CALLOUT ============== */
+  .callout {
+    background: var(--black);
+    color: rgba(255,255,255,.85);
+    border-radius: var(--r-lg);
+    padding: 18px 22px;
+    margin-bottom: 24px;
+    border: 1px solid rgba(255,255,255,.06);
+  }
+  .callout h3 {
+    margin: 0 0 8px;
+    font-family: var(--sans);
+    font-size: 13px;
+    color: #fff;
+    font-weight: 600;
+    letter-spacing: -.01em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .callout h3::before {
+    content: '';
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+  .callout ul {
+    margin: 0;
+    padding-left: 20px;
+    font-size: 13px;
+    line-height: 1.7;
+  }
+  .callout strong { color: #fff; font-weight: 500; }
+
+  /* ============== VIEW TABS ============== */
+  .view-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+  }
+  .view-tabs {
+    background: var(--frost);
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+    border: 1px solid rgba(255,255,255,.6);
+    border-radius: 999px;
+    padding: 4px;
+    display: inline-flex;
+    gap: 0;
+  }
+  .view-tab {
+    background: transparent;
+    border: 0;
+    padding: 8px 16px;
+    border-radius: 999px;
+    font-family: var(--sans);
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--ink-soft);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    position: relative;
+  }
+  .view-tab:hover { color: var(--black); }
+  .view-tab.active {
+    background: var(--black);
+    color: #fff;
+    font-weight: 500;
+  }
+  .view-tab.new::before {
+    content: 'NEW';
+    background: var(--black);
+    color: #fff;
+    font-family: var(--mono);
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: .12em;
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+
+  .status-tabs {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 0;
+    background: var(--frost);
+    backdrop-filter: blur(20px) saturate(140%);
+    border: 1px solid rgba(255,255,255,.6);
+    border-radius: 999px;
+    padding: 4px;
+  }
+  .status-tab {
+    background: transparent;
+    border: 0;
+    padding: 8px 18px;
+    border-radius: 999px;
+    font-family: var(--sans);
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--ink-soft);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .status-tab.active {
+    background: var(--black);
+    color: #fff;
+    font-weight: 500;
+  }
+  .status-tab .badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-mute);
+  }
+  .status-tab.active .badge { color: rgba(255,255,255,.55); }
+
+  /* ============== FILTER BAR ============== */
+  .filter-bar {
+    border-radius: var(--r-xl);
+    padding: 14px 18px;
+    margin-bottom: 18px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    background: var(--frost);
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+    border: 1px solid rgba(255,255,255,.6);
+  }
+  .filter-bar .label {
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    margin-right: 4px;
+  }
+  .filter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--black);
+    color: #fff;
+    padding: 5px 6px 5px 12px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 400;
+  }
+  .filter-chip .key {
+    color: rgba(255,255,255,.5);
+    font-family: var(--mono);
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: .12em;
+  }
+  .filter-chip .x {
+    background: rgba(255,255,255,.12);
+    color: #fff;
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 11px;
+  }
+  .filter-chip .x:hover { background: rgba(255,255,255,.22); }
+  .filter-add {
+    background: transparent;
+    border: 1px dashed var(--line-strong);
+    color: var(--ink-soft);
+    padding: 5px 12px;
+    border-radius: 999px;
+    font-family: var(--sans);
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .filter-add:hover { border-style: solid; border-color: var(--black); color: var(--black); }
+  .saved-views {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .saved-views select {
+    background: transparent;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    padding: 6px 12px;
+    font-family: var(--sans);
+    font-size: 12px;
+    color: var(--ink);
+    cursor: pointer;
+  }
+  .save-view-btn {
+    background: var(--black);
+    color: #fff;
+    border: 0;
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-family: var(--sans);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+
+  .filter-explainer {
+    font-size: 12px;
+    color: var(--ink-soft);
+    margin-bottom: 16px;
+    padding: 10px 16px;
+    border-radius: var(--r-md);
+    background: var(--frost-deep);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255,255,255,.5);
+    border-left: 3px solid var(--black);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .filter-explainer strong { color: var(--black); font-weight: 500; }
+
+  /* ============== TASKS ============== */
+  .add-task-row {
+    background: transparent;
+    border: 1px dashed var(--line-strong);
+    border-radius: var(--r-lg);
+    padding: 14px 22px;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--ink-mute);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .add-task-row:hover {
+    border-color: var(--black);
+    color: var(--black);
+    background: var(--frost-deep);
+  }
+  .add-task-row .plus {
+    width: 22px; height: 22px;
+    background: var(--ink-ghost);
+    color: var(--black);
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 500;
+    font-size: 13px;
+  }
+  .add-task-row:hover .plus { background: var(--black); color: #fff; }
+
+  .task {
+    border-radius: var(--r-lg);
+    padding: 16px 20px;
+    margin-bottom: 10px;
+    transition: all .15s;
+    position: relative;
+    background: var(--frost-strong);
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+    border: 1px solid rgba(255,255,255,.7);
+  }
+  .task:hover { background: rgba(255,255,255,.95); }
+  .task.active-tracking { background: var(--black); color: #fff; border-color: rgba(255,255,255,.06); }
+  .task.active-tracking .task-title { color: #fff; }
+  .task.active-tracking .task-time { color: rgba(255,255,255,.7); }
+  .task.active-tracking .why-here { color: rgba(255,255,255,.5); }
+  .task.active-tracking .why-here strong { color: #fff; font-weight: 600; }
+  .task.active-tracking .checkbox { border-color: rgba(255,255,255,.25); background: transparent; }
+  .task.active-tracking .timer-icon { background: rgba(255,255,255,.1); color: rgba(255,255,255,.7); }
+  .task.active-tracking .toggle-arrow { color: rgba(255,255,255,.4); }
+  .task.active-tracking .icon-btn { color: rgba(255,255,255,.5); }
+  .task.active-tracking .icon-btn:hover { background: rgba(255,255,255,.08); color: #fff; }
+  .task.active-tracking .icon-btn.play { border-color: rgba(255,255,255,.15); color: rgba(255,255,255,.7); }
+  .task.active-tracking .icon-btn.play.running {
+    background: #fff;
+    color: var(--black);
+    border-color: #fff;
+  }
+  .task.active-tracking .progress-bar-task { background: rgba(255,255,255,.12); }
+  .task.active-tracking .progress-bar-task .fill { background: #fff; }
+  .task.active-tracking .pct { color: #fff; }
+  .task.active-tracking .subtasks { border-color: rgba(255,255,255,.1); }
+  .task.active-tracking .subtask { color: rgba(255,255,255,.7); }
+  .task.active-tracking .subtask.done { color: rgba(255,255,255,.35); }
+  .task.active-tracking .subtask .checkbox.checked { background: rgba(255,255,255,.85); border-color: rgba(255,255,255,.85); }
+  .task.active-tracking .subtask .checkbox.checked::after { background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M3 8L7 12L13 4' stroke='%230a0a0a' stroke-width='2.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>"); }
+  .task.active-tracking .task-progress { color: rgba(255,255,255,.5); }
+  .task.active-tracking .sub-time { color: rgba(255,255,255,.85); font-weight: 600; }
+  .task.active-tracking .tag.tag-generic { background: rgba(255,255,255,.08); color: rgba(255,255,255,.7); }
+
+  .task.bounced { border-left: 3px solid var(--black); background: var(--frost-deep); }
+
+  .task-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .checkbox {
+    width: 20px; height: 20px;
+    border: 1.5px solid var(--line-strong);
+    border-radius: var(--r);
+    cursor: pointer;
+    background: rgba(255,255,255,.6);
+    flex-shrink: 0;
+    transition: all .15s;
+  }
+  .checkbox:hover { border-color: var(--black); }
+  .checkbox.checked {
+    background: var(--black);
+    border-color: var(--black);
+    position: relative;
+  }
+  .checkbox.checked::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M3 8L7 12L13 4' stroke='%23fff' stroke-width='2.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    background-size: contain;
+  }
+  .timer-icon {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: rgba(0,0,0,.06);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--ink-soft);
+    flex-shrink: 0;
+    font-size: 12px;
+  }
+  .toggle-arrow {
+    color: var(--ink-mute);
+    font-size: 9px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .task-title {
+    font-family: var(--sans);
+    font-weight: 500;
+    font-size: 15px;
+    flex: 1;
+    color: var(--ink);
+    letter-spacing: -.005em;
+  }
+  .task-time {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-mute);
+    font-weight: 500;
+  }
+  .task-time.has-time { color: var(--black); font-weight: 700; }
+  .task-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+  }
+  .icon-btn {
+    width: 28px; height: 28px;
+    border-radius: var(--r);
+    background: transparent;
+    border: 0;
+    color: var(--ink-mute);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+  }
+  .icon-btn:hover { background: rgba(0,0,0,.06); color: var(--black); }
+  .icon-btn.play {
+    background: transparent;
+    color: var(--ink-mute);
+    border: 1px solid var(--line-strong);
+  }
+  .icon-btn.play:hover {
+    background: var(--black);
+    color: #fff;
+    border-color: var(--black);
+  }
+  .icon-btn.play.running {
+    background: var(--black);
+    color: #fff;
+    border-color: var(--black);
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255,255,255,.4); }
+    50% { box-shadow: 0 0 0 6px rgba(255,91,58,0); }
+  }
+
+  .task-meta {
+    margin-top: 12px;
+    margin-left: 32px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .tag {
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 500;
+    padding: 3px 9px;
+    border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: rgba(0,0,0,.06);
+    color: var(--ink-soft);
+  }
+  .tag .dot {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    display: inline-block;
+    background: var(--ink-mute);
+  }
+  .tag.priority {
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: .12em;
+    padding: 2px 6px;
+  }
+  .tag.priority-urgent { background: var(--black); color: #fff; }
+  .tag.priority-med { background: rgba(0,0,0,.12); color: var(--black); }
+  .tag.priority-low { background: rgba(0,0,0,.04); color: var(--ink-soft); border: 1px solid var(--line); }
+
+  .why-here {
+    font-family: var(--sans);
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--ink-mute);
+    margin-left: 32px;
+    margin-top: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    line-height: 1.4;
+  }
+  .why-here strong { color: var(--black); font-weight: 500; font-style: normal; font-family: var(--sans); font-size: 12px; }
+  .why-here.warn strong { color: var(--black); }
+
+  .task-progress {
+    margin-top: 12px;
+    margin-left: 32px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-mute);
+    letter-spacing: .04em;
+  }
+  .progress-bar-task {
+    flex: 1;
+    height: 2px;
+    background: var(--line-strong);
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  .progress-bar-task .fill { height: 100%; background: var(--black); }
+  .task-progress .pct { color: var(--black); font-weight: 600; min-width: 32px; text-align: right; }
+
+  .subtasks {
+    margin-top: 12px;
+    margin-left: 32px;
+    border-left: 1px solid var(--line);
+    padding-left: 16px;
+  }
+  .subtask {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 0;
+    font-size: 13px;
+    color: var(--ink-soft);
+  }
+  .subtask .checkbox { width: 16px; height: 16px; }
+  .subtask.done { color: var(--ink-mute); text-decoration: line-through; }
+  .subtask .sub-time {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--black);
+    font-weight: 700;
+  }
+
+  /* ============== LIST VIEW — projects as squares ============== */
+  .list-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+  }
+  @media (max-width: 1100px) {
+    .list-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 720px) {
+    .list-grid { grid-template-columns: 1fr; }
+  }
+
+  .project-square {
+    border-radius: var(--r-xl);
+    padding: 0;
+    transition: all .2s;
+    background: var(--frost);
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+    border: 1px solid rgba(255,255,255,.6);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 380px;
+  }
+  .project-square.featured {
+    background: var(--black);
+    color: #fff;
+    border-color: rgba(255,255,255,.06);
+  }
+  .project-square:hover {
+    transform: translateY(-2px);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.9),
+      0 12px 36px rgba(10,10,10,.1);
+  }
+  .project-square.featured:hover {
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.08),
+      0 12px 36px rgba(0,0,0,.25);
+  }
+
+  .ps-head {
+    padding: 22px 22px 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  .project-square.featured .ps-head { border-color: rgba(255,255,255,.08); }
+
+  .ps-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .ps-status-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--black);
+  }
+  .project-square.featured .ps-status-dot {
+    background: #fff;
+    box-shadow: 0 0 0 3px rgba(255,255,255,.18);
+    animation: live 1.6s ease-in-out infinite;
+  }
+  .ps-status-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+  }
+  .project-square.featured .ps-status-label { color: rgba(255,255,255,.55); }
+  .ps-count {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-mute);
+    letter-spacing: .04em;
+  }
+  .project-square.featured .ps-count { color: rgba(255,255,255,.55); }
+
+  .ps-title {
+    font-family: var(--sans);
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: -.025em;
+    line-height: 1.05;
+    margin: 0 0 4px;
+  }
+  .ps-subtitle {
+    font-family: var(--sans);
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--ink-mute);
+    margin: 0 0 14px;
+  }
+  .project-square.featured .ps-subtitle { color: rgba(255,255,255,.55); }
+
+  .ps-progress-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 4px;
+  }
+  .ps-progress-bar {
+    flex: 1;
+    height: 3px;
+    background: var(--line-strong);
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  .ps-progress-bar .fill {
+    height: 100%;
+    background: var(--black);
+    border-radius: 999px;
+    transition: width .4s ease;
+  }
+  .project-square.featured .ps-progress-bar { background: rgba(255,255,255,.12); }
+  .project-square.featured .ps-progress-bar .fill { background: #fff; }
+  .ps-progress-pct {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink);
+    font-weight: 600;
+    letter-spacing: .04em;
+    min-width: 32px;
+    text-align: right;
+  }
+  .project-square.featured .ps-progress-pct { color: #fff; }
+
+  .ps-stats {
+    display: flex;
+    gap: 18px;
+    margin-top: 14px;
+  }
+  .ps-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .ps-stat .lbl {
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: .2em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+  }
+  .project-square.featured .ps-stat .lbl { color: rgba(255,255,255,.5); }
+  .ps-stat .v {
+    font-family: var(--sans);
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: -.02em;
+  }
+  .ps-stat .v em {
+    font-style: normal;
+    font-weight: 400;
+    font-size: 12px;
+    color: var(--ink-mute);
+    margin-left: 2px;
+  }
+  .project-square.featured .ps-stat .v em { color: rgba(255,255,255,.55); }
+
+  /* tasks inside the project square */
+  .ps-tasks {
+    padding: 14px 16px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    overflow-y: auto;
+    max-height: 380px;
+  }
+  .ps-tasks::-webkit-scrollbar { width: 4px; }
+  .ps-tasks::-webkit-scrollbar-thumb { background: rgba(0,0,0,.1); border-radius: 999px; }
+  .project-square.featured .ps-tasks::-webkit-scrollbar-thumb { background: rgba(255,255,255,.15); }
+
+  .ps-task {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 9px 10px;
+    border-radius: 8px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background .15s;
+  }
+  .ps-task:hover { background: rgba(0,0,0,.04); }
+  .project-square.featured .ps-task:hover { background: rgba(255,255,255,.06); }
+  .ps-task.done {
+    color: var(--ink-mute);
+  }
+  .ps-task.done .ps-task-title { text-decoration: line-through; }
+  .project-square.featured .ps-task.done { color: rgba(255,255,255,.45); }
+
+  .ps-task .checkbox {
+    width: 16px; height: 16px;
+    border-radius: 4px;
+    flex-shrink: 0;
+  }
+  .project-square.featured .ps-task .checkbox {
+    background: transparent;
+    border-color: rgba(255,255,255,.25);
+  }
+  .project-square.featured .ps-task .checkbox.checked {
+    background: #fff;
+    border-color: #fff;
+  }
+  .project-square.featured .ps-task .checkbox.checked::after {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M3 8L7 12L13 4' stroke='%230a0a0a' stroke-width='2.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  }
+
+  .ps-task-title {
+    flex: 1;
+    font-weight: 500;
+    color: var(--ink);
+    line-height: 1.35;
+  }
+  .project-square.featured .ps-task-title { color: #fff; }
+
+  .ps-task-cat-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .ps-task-cat-dot.dev { background: #0a0a0a; }
+  .ps-task-cat-dot.outreach { background: #52525b; }
+  .ps-task-cat-dot.content { background: #a1a1aa; }
+  .ps-task-cat-dot.admin { background: #d4d4d8; }
+  .ps-task-cat-dot.learning { background: #71717a; }
+  .ps-task-cat-dot.personal { background: #27272a; }
+  .project-square.featured .ps-task-cat-dot.dev { background: #fff; }
+  .project-square.featured .ps-task-cat-dot.outreach { background: rgba(255,255,255,.7); }
+  .project-square.featured .ps-task-cat-dot.content { background: rgba(255,255,255,.5); }
+  .project-square.featured .ps-task-cat-dot.admin { background: rgba(255,255,255,.35); }
+
+  .ps-task-prio {
+    font-family: var(--mono);
+    font-size: 8.5px;
+    font-weight: 700;
+    letter-spacing: .12em;
+    padding: 2px 5px;
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+  .ps-task-prio.urg { background: var(--black); color: #fff; }
+  .ps-task-prio.med { background: rgba(0,0,0,.1); color: var(--ink); }
+  .ps-task-prio.low { background: transparent; color: var(--ink-mute); border: 1px solid var(--line-strong); }
+  .project-square.featured .ps-task-prio.urg { background: #fff; color: var(--black); }
+  .project-square.featured .ps-task-prio.med { background: rgba(255,255,255,.16); color: #fff; }
+  .project-square.featured .ps-task-prio.low { color: rgba(255,255,255,.55); border-color: rgba(255,255,255,.18); }
+
+  .ps-task-time {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-mute);
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+  .ps-task-time.has-time { color: var(--ink); font-weight: 600; }
+  .project-square.featured .ps-task-time { color: rgba(255,255,255,.5); }
+  .project-square.featured .ps-task-time.has-time { color: #fff; font-weight: 600; }
+
+  .ps-task-due {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--ink-mute);
+    letter-spacing: .04em;
+    flex-shrink: 0;
+  }
+  .ps-task-due.overdue {
+    color: var(--ink);
+    font-weight: 600;
+  }
+  .ps-task-due.overdue::before { content: '⚠ '; }
+  .project-square.featured .ps-task-due { color: rgba(255,255,255,.5); }
+  .project-square.featured .ps-task-due.overdue { color: #fff; }
+
+  .ps-add {
+    margin: 0 16px 16px;
+    border: 1px dashed var(--line-strong);
+    border-radius: 8px;
+    padding: 10px;
+    text-align: center;
+    color: var(--ink-mute);
+    font-family: var(--sans);
+    font-size: 12px;
+    cursor: pointer;
+    background: transparent;
+    transition: all .15s;
+  }
+  .ps-add:hover { border-color: var(--black); color: var(--black); }
+  .project-square.featured .ps-add { border-color: rgba(255,255,255,.18); color: rgba(255,255,255,.6); }
+  .project-square.featured .ps-add:hover { border-color: #fff; color: #fff; }
+
+  .ps-empty {
+    padding: 24px 16px;
+    text-align: center;
+    color: var(--ink-mute);
+    font-family: var(--sans);
+    font-size: 13px;
+    font-weight: 400;
+  }
+  .ps-empty em {
+    font-style: normal;
+    color: var(--ink);
+    font-weight: 600;
+  }
+
+  /* Compact project square for low-activity ones */
+  .project-square.compact {
+    min-height: 200px;
+  }
+  .project-square.compact .ps-stats { display: none; }
+
+  /* Sort/filter toolbar above the grid */
+  .list-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 18px;
+    flex-wrap: wrap;
+  }
+  .list-toolbar .group-by {
+    display: inline-flex;
+    background: var(--frost);
+    backdrop-filter: blur(20px) saturate(140%);
+    border: 1px solid rgba(255,255,255,.6);
+    border-radius: 999px;
+    padding: 4px;
+  }
+  .list-toolbar .group-by button {
+    background: transparent;
+    border: 0;
+    padding: 7px 14px;
+    border-radius: 999px;
+    font-family: var(--sans);
+    font-size: 12px;
+    color: var(--ink-soft);
+    cursor: pointer;
+  }
+  .list-toolbar .group-by button.active {
+    background: var(--black);
+    color: #fff;
+    font-weight: 500;
+  }
+  .list-toolbar .sort-by {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: .15em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+  }
+  .list-toolbar .sort-by select {
+    background: transparent;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    padding: 6px 12px;
+    font-family: var(--sans);
+    font-size: 12px;
+    color: var(--ink);
+    cursor: pointer;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+
+  /* ============== PRIORITY VIEW ============== */
+  .priority-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 14px;
+  }
+  .priority-col {
+    border-radius: var(--r-xl);
+    padding: 22px 18px;
+    min-height: 420px;
+    background: var(--frost);
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+    border: 1px solid rgba(255,255,255,.6);
+  }
+  .priority-col.urgent {
+    background: var(--black);
+    color: #fff;
+    border-color: rgba(255,255,255,.06);
+  }
+  .priority-col.urgent .priority-col-head .name { color: #fff; }
+  .priority-col.urgent .priority-col-head .count { color: rgba(255,255,255,.55); }
+  .priority-col.urgent .priority-col-head { border-color: rgba(255,255,255,.1); }
+  .priority-col.urgent .task { background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.08); }
+  .priority-col.urgent .task-title { color: #fff; }
+  .priority-col.urgent .checkbox { border-color: rgba(255,255,255,.3); background: transparent; }
+  .priority-col.urgent .timer-icon { background: rgba(255,255,255,.08); color: rgba(255,255,255,.7); }
+  .priority-col.urgent .tag { background: rgba(255,255,255,.08); color: rgba(255,255,255,.85); }
+  .priority-col.urgent .priority-add {
+    border-color: rgba(255,255,255,.18);
+    color: rgba(255,255,255,.6);
+  }
+  .priority-col.urgent .priority-add:hover { border-color: #fff; color: #fff; }
+
+  .priority-col-head {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 18px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  .priority-col-head .marker {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    align-self: center;
+  }
+  .priority-col-head .name {
+    font-family: var(--sans);
+    font-size: 22px;
+    font-weight: 400;
+    letter-spacing: -.015em;
+    flex: 1;
+  }
+  .priority-col-head .name em {  }
+  .priority-col-head .count {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-mute);
+  }
+  .priority-col.urgent .marker { background: #fff; box-shadow: 0 0 0 4px rgba(255,255,255,.18); }
+  .priority-col.med .marker { background: var(--black); }
+  .priority-col.low .marker { background: var(--ink-mute); }
+
+  .priority-col .task { padding: 12px 14px; margin-bottom: 8px; }
+  .priority-col .task-title { font-size: 13.5px; }
+  .priority-col .task-meta { margin-left: 0; margin-top: 9px; }
+
+  .priority-add {
+    border: 1px dashed var(--line-strong);
+    border-radius: var(--r-md);
+    padding: 10px;
+    text-align: center;
+    color: var(--ink-mute);
+    font-size: 12px;
+    cursor: pointer;
+    margin-top: 8px;
+    background: transparent;
+  }
+  .priority-add:hover { border-color: var(--black); color: var(--black); }
+
+  /* ============== MODAL ============== */
+  .modal-stage {
+    background:
+      radial-gradient(800px circle at 30% 20%, rgba(0,0,0,.04), transparent),
+      radial-gradient(800px circle at 70% 80%, rgba(0,0,0,.03), transparent);
+    padding: 40px;
+    border-radius: var(--r-xl);
+    background-color: var(--bg-deep);
+  }
+  .modal {
+    background: var(--frost-strong);
+    backdrop-filter: blur(30px) saturate(160%);
+    -webkit-backdrop-filter: blur(30px) saturate(160%);
+    border: 1px solid rgba(255,255,255,.7);
+    border-radius: var(--r-xl);
+    padding: 32px;
+    width: 100%;
+    max-width: 540px;
+    margin: 0 auto;
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.9),
+      0 24px 48px rgba(0,0,0,.08);
+  }
+  .modal h2 {
+    margin: 0 0 24px;
+    font-family: var(--sans);
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -.025em;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .modal h2 em {
+    font-style: normal;
+    font-weight: 400;
+    color: var(--ink-mute);
+  }
+  .modal h2 .from-filter {
+    font-family: var(--mono);
+    font-size: 9px;
+    background: var(--black);
+    color: #fff;
+    padding: 3px 7px;
+    border-radius: 4px;
+    font-weight: 600;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+  }
+  .modal-close {
+    margin-left: auto;
+    background: transparent;
+    border: 0;
+    font-size: 22px;
+    color: var(--ink-mute);
+    cursor: pointer;
+    line-height: 1;
+  }
+  .modal-input {
+    width: 100%;
+    border: 0;
+    border-bottom: 1px solid var(--line-strong);
+    padding: 10px 0;
+    font-size: 18px;
+    font-family: var(--sans);
+    margin-bottom: 22px;
+    background: transparent;
+    outline: none;
+    color: var(--ink);
+    font-weight: 500;
+  }
+  .modal-input::placeholder {
+    color: var(--ink-mute);
+    font-weight: 400;
+  }
+  .modal-input:focus { border-color: var(--black); }
+  .modal-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 18px;
+  }
+  .modal-select {
+    background: transparent;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-family: var(--sans);
+    font-size: 12px;
+    cursor: pointer;
+    color: var(--ink-soft);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .modal-select:hover { border-color: var(--black); color: var(--black); }
+  .modal-select.has-value {
+    background: var(--black);
+    border-color: var(--black);
+    color: #fff;
+  }
+  .modal-select.inherited::before {
+    content: '↪';
+    color: var(--black);
+    font-weight: 700;
+    margin-right: -2px;
+  }
+  .modal-select .caret { font-size: 9px; opacity: .6; }
+  .modal-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 28px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+  }
+  .keybind {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-mute);
+  }
+  .keybind kbd {
+    background: rgba(0,0,0,.06);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-family: var(--mono);
+    font-size: 10px;
+  }
+  .modal-create {
+    margin-left: auto;
+    background: var(--black);
+    color: #fff;
+    border: 0;
+    padding: 10px 22px;
+    border-radius: 999px;
+    font-family: var(--sans);
+    font-weight: 500;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .modal-create:hover { background: var(--black-soft); }
+
+  .ai-assist {
+    background: rgba(0,0,0,.04);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    padding: 12px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .ai-assist .ai-label {
+    font-family: var(--sans);
+    font-size: 13px;
+    color: var(--black);
+    font-weight: 600;
+    letter-spacing: -.005em;
+  }
+  .ai-assist .ai-pill {
+    background: var(--white);
+    border: 1px solid var(--line);
+    color: var(--ink-soft);
+    padding: 4px 12px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    cursor: pointer;
+  }
+  .ai-assist .ai-pill:hover { background: var(--black); color: #fff; border-color: var(--black); }
+
+  /* ============== DROPDOWN ============== */
+  .dd-panel {
+    background: var(--frost-strong);
+    backdrop-filter: blur(30px) saturate(160%);
+    -webkit-backdrop-filter: blur(30px) saturate(160%);
+    border: 1px solid rgba(255,255,255,.7);
+    border-radius: var(--r-md);
+    padding: 8px;
+    width: 280px;
+    box-shadow: 0 12px 32px rgba(0,0,0,.1);
+  }
+  .dd-search {
+    width: 100%;
+    border: 1px solid var(--line);
+    border-radius: var(--r);
+    padding: 7px 10px;
+    font-family: var(--sans);
+    font-size: 12px;
+    margin-bottom: 6px;
+    outline: none;
+    background: rgba(255,255,255,.6);
+  }
+  .dd-search:focus { border-color: var(--black); }
+  .dd-item {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 7px 10px;
+    border-radius: var(--r);
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .dd-item:hover { background: rgba(0,0,0,.05); }
+  .dd-item .mini-cb {
+    width: 14px; height: 14px;
+    border: 1.5px solid var(--line-strong);
+    border-radius: 3px;
+    flex-shrink: 0;
+    background: rgba(255,255,255,.7);
+  }
+  .dd-item.selected .mini-cb {
+    background: var(--black);
+    border-color: var(--black);
+    position: relative;
+  }
+  .dd-item.selected .mini-cb::after {
+    content: '✓';
+    color: #fff;
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    font-weight: 700;
+  }
+  .dd-item .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+  }
+  .dd-item.completed-item {
+    color: var(--ink-mute);
+    
+  }
+  .dd-item.completed-item .lbl-tag {
+    margin-left: auto;
+    background: rgba(0,0,0,.08);
+    color: var(--ink-soft);
+    font-family: var(--mono);
+    font-size: 8px;
+    font-weight: 600;
+    letter-spacing: .1em;
+    padding: 1px 5px;
+    border-radius: 2px;
+    text-transform: uppercase;
+    font-style: normal;
+  }
+  .dd-divider {
+    height: 1px;
+    background: var(--line);
+    margin: 6px 0;
+  }
+  .dd-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    font-size: 12px;
+    color: var(--ink-soft);
+    cursor: pointer;
+  }
+  .dd-toggle input { accent-color: var(--black); }
+  .dd-create {
+    color: var(--black);
+    font-weight: 500;
+    font-size: 13px;
+    padding: 8px 10px;
+    cursor: pointer;
+    font-family: var(--sans);
+  }
+  .dd-hint {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--ink-mute);
+    text-align: center;
+    padding: 6px 0 2px;
+    border-top: 1px dashed var(--line);
+    margin-top: 4px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+
+  /* ============== MANAGE PROJECTS ============== */
+  .mp-tabs {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 24px;
+    background: var(--frost);
+    backdrop-filter: blur(20px) saturate(140%);
+    border: 1px solid rgba(255,255,255,.6);
+    border-radius: 999px;
+    padding: 4px;
+    width: fit-content;
+  }
+  .mp-tab {
+    background: transparent;
+    border: 0;
+    padding: 8px 16px;
+    border-radius: 999px;
+    font-family: var(--sans);
+    font-size: 13px;
+    color: var(--ink-soft);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .mp-tab.active { background: var(--black); color: #fff; }
+  .mp-tab .num {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-mute);
+  }
+  .mp-tab.active .num { color: rgba(255,255,255,.5); }
+
+  .pm-list {
+    background: var(--frost);
+    backdrop-filter: blur(20px) saturate(140%);
+    border: 1px solid rgba(255,255,255,.6);
+    border-radius: var(--r-xl);
+    padding: 8px 24px;
+  }
+  .pm-row {
+    display: grid;
+    grid-template-columns: 200px 140px 1fr auto;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .pm-row:last-child { border-bottom: 0; }
+  .pm-row .pm-tag {
+    font-family: var(--sans);
+    font-size: 13px;
+    font-weight: 500;
+    padding: 5px 12px;
+    border-radius: 999px;
+    width: fit-content;
+    background: rgba(0,0,0,.06);
+    color: var(--ink);
+  }
+  .pm-row .pm-tag::before {
+    content: '';
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--ink-mute);
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+  .pm-row .pm-status {
+    background: var(--white);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 6px 32px 6px 14px;
+    font-family: var(--sans);
+    font-size: 12px;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1L5 5L9 1' stroke='%2371717a' stroke-width='1.5' fill='none' stroke-linecap='round'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+  }
+  .pm-row .pm-meta {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-mute);
+  }
+  .pm-row .pm-actions {
+    display: inline-flex;
+    gap: 14px;
+    font-size: 12px;
+  }
+  .pm-row .pm-actions a {
+    color: var(--ink);
+    cursor: pointer;
+    text-decoration: none;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 1px;
+  }
+  .pm-row .pm-actions a:hover { color: var(--black); border-color: var(--black); }
+  .pm-row .pm-actions a.delete:hover { color: var(--accent); border-color: var(--accent); }
+  .pm-row.completed .pm-tag {
+    opacity: .5;
+    text-decoration: line-through;
+  }
+  .pm-row.completed .hidden-hint {
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--ink-mute);
+  }
+
+  .add-new-form {
+    margin-top: 18px;
+    padding: 22px 24px;
+    background: var(--black);
+    color: #fff;
+    border-radius: var(--r-xl);
+  }
+  .add-new-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,.55);
+    margin-bottom: 12px;
+  }
+  .add-new-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .add-new-row input {
+    flex: 1;
+    border: 0;
+    border-bottom: 1px solid rgba(255,255,255,.2);
+    padding: 8px 0;
+    font-family: var(--sans);
+    font-size: 16px;
+    font-weight: 400;
+    background: transparent;
+    outline: none;
+    color: #fff;
+  }
+  .add-new-row input::placeholder { color: rgba(255,255,255,.4); }
+  .add-new-row input:focus { border-color: #fff; }
+  .color-pickers { display: flex; gap: 5px; }
+  .color-pickers span {
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 1px solid rgba(255,255,255,.15);
+  }
+  .color-pickers span.selected { outline: 2px solid #fff; outline-offset: 2px; }
+  .add-new-row .modal-create {
+    background: #fff;
+    color: var(--black);
+  }
+
+  .status-guide {
+    margin-top: 20px;
+    padding: 20px 24px;
+    background: var(--frost);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255,255,255,.6);
+    border-radius: var(--r-xl);
+    font-size: 12px;
+    color: var(--ink-soft);
+    line-height: 1.7;
+  }
+  .status-guide .sg-title {
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    color: var(--black);
+    margin-bottom: 12px;
+  }
+  .status-guide-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 18px;
+  }
+  .status-guide strong { color: var(--black); font-weight: 500; }
+
+  /* ============== INSIGHTS ============== */
+  .insights-tabs {
+    display: inline-flex;
+    gap: 4px;
+    background: var(--frost);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255,255,255,.6);
+    border-radius: 999px;
+    padding: 4px;
+    margin-bottom: 28px;
+  }
+  .insights-tab {
+    background: transparent;
+    border: 0;
+    padding: 8px 18px;
+    border-radius: 999px;
+    font-family: var(--sans);
+    font-size: 13px;
+    color: var(--ink-soft);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .insights-tab.active { background: var(--black); color: #fff; font-weight: 500; }
+  .insights-tab.new::before {
+    content: 'NEW';
+    background: var(--black);
+    color: #fff;
+    font-family: var(--mono);
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: .12em;
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 26px;
+  }
+  .stat {
+    border-radius: var(--r-xl);
+    padding: 22px 24px;
+    background: var(--frost);
+    backdrop-filter: blur(20px) saturate(140%);
+    border: 1px solid rgba(255,255,255,.6);
+    position: relative;
+  }
+  .stat.dark { background: var(--black); color: #fff; border-color: rgba(255,255,255,.06); }
+  .stat .lbl {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    margin-bottom: 14px;
+  }
+  .stat.dark .lbl { color: rgba(255,255,255,.5); }
+  .stat .val {
+    font-family: var(--sans);
+    font-size: 40px;
+    font-weight: 700;
+    letter-spacing: -.035em;
+    line-height: 1;
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+  }
+  .stat .val .sm {
+    font-size: 17px;
+    font-weight: 400;
+    color: var(--ink-mute);
+  }
+  .stat.dark .val .sm { color: rgba(255,255,255,.5); }
+  .stat .sub {
+    font-family: var(--sans);
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--ink-mute);
+    margin-top: 12px;
+  }
+  .stat.dark .sub { color: rgba(255,255,255,.5); }
+  .stat.streak .val em { font-style: normal; color: #fff; font-weight: 700; }
+
+  .insight-card {
+    background: var(--frost);
+    backdrop-filter: blur(20px) saturate(140%);
+    border: 1px solid rgba(255,255,255,.6);
+    border-radius: var(--r-xl);
+    padding: 26px 28px;
+    margin-bottom: 14px;
+  }
+  .insight-card.dark {
+    background: var(--black);
+    color: #fff;
+    border-color: rgba(255,255,255,.06);
+  }
+  .insight-card-head {
+    display: flex;
+    align-items: baseline;
+    margin-bottom: 24px;
+    gap: 16px;
+  }
+  .insight-card-head h3 {
+    margin: 0;
+    font-family: var(--sans);
+    font-size: 28px;
+    font-weight: 400;
+    letter-spacing: -.025em;
+  }
+  .insight-card-head h3 em {  }
+  .insight-card-head .sub {
+    font-family: var(--sans);
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--ink-mute);
+  }
+  .insight-card.dark .insight-card-head .sub { color: rgba(255,255,255,.5); }
+  .insight-card-head .right {
+    margin-left: auto;
+    display: flex;
+    gap: 4px;
+    background: rgba(0,0,0,.05);
+    border-radius: 999px;
+    padding: 3px;
+  }
+  .insight-card.dark .insight-card-head .right { background: rgba(255,255,255,.06); }
+  .insight-card-head .right button {
+    background: transparent;
+    border: 0;
+    padding: 5px 12px;
+    border-radius: 999px;
+    font-family: var(--sans);
+    font-size: 11px;
+    color: var(--ink-soft);
+    cursor: pointer;
+  }
+  .insight-card.dark .insight-card-head .right button { color: rgba(255,255,255,.7); }
+  .insight-card-head .right button.active {
+    background: var(--black);
+    color: #fff;
+  }
+  .insight-card.dark .insight-card-head .right button.active {
+    background: #fff;
+    color: var(--black);
+  }
+
+  /* ============== DAY HEATMAP (90 days) ============== */
+  .heatmap-wrap {
+    display: grid;
+    grid-template-columns: 24px max-content;
+    gap: 8px;
+    justify-content: center;
+  }
+  .hm-day-labels {
+    display: grid;
+    grid-template-rows: 14px repeat(7, 13px);
+    gap: 3px;
+    font-family: var(--mono);
+    font-size: 8px;
+    color: var(--ink-mute);
+    align-items: center;
+    text-align: right;
+    padding-top: 0;
+  }
+  .insight-card.dark .hm-day-labels { color: rgba(255,255,255,.45); }
+  .heatmap {
+    display: grid;
+    grid-template-columns: repeat(13, 13px);
+    grid-auto-flow: column;
+    grid-template-rows: 14px repeat(7, 13px);
+    gap: 3px;
+  }
+  .hm-month-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--ink-mute);
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    padding-left: 2px;
+  }
+  .insight-card.dark .hm-month-label { color: rgba(255,255,255,.45); }
+  .hm-cell {
+    width: 13px;
+    height: 13px;
+    border-radius: 2px;
+    background: rgba(0,0,0,.06);
+    cursor: pointer;
+    transition: all .15s;
+    position: relative;
+  }
+  .insight-card.dark .hm-cell { background: rgba(255,255,255,.06); }
+  .hm-cell:hover { transform: scale(1.4); z-index: 5; }
+  /* white card scale */
+  .heatmap.scale-light .hm-cell.l1 { background: #d4d4d8; }
+  .heatmap.scale-light .hm-cell.l2 { background: #71717a; }
+  .heatmap.scale-light .hm-cell.l3 { background: #27272a; }
+  .heatmap.scale-light .hm-cell.l4 { background: #0a0a0a; }
+  /* dark card scale */
+  .heatmap.scale-dark .hm-cell.l1 { background: rgba(255,255,255,.18); }
+  .heatmap.scale-dark .hm-cell.l2 { background: rgba(255,255,255,.4); }
+  .heatmap.scale-dark .hm-cell.l3 { background: rgba(255,255,255,.7); }
+  .heatmap.scale-dark .hm-cell.l4 { background: #ffffff; }
+  .hm-cell.today { outline: 1.5px solid #ffffff; outline-offset: 1px; }
+  .hm-cell.l4.streak::after {
+    content: '';
+    position: absolute;
+    inset: 4px;
+    border-radius: 50%;
+    background: rgba(0,0,0,.4);
+  }
+  .heatmap-legend {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--ink-mute);
+    margin-top: 14px;
+    justify-content: center;
+  }
+  .insight-card.dark .heatmap-legend { color: rgba(255,255,255,.5); }
+  .heatmap-legend .lg-cell {
+    width: 9px; height: 9px;
+    border-radius: 2px;
+  }
+
+  /* ============== WHEN-YOU-WORK HEATMAP (Hours × Day) ============== */
+  .hour-heatmap {
+    display: grid;
+    grid-template-columns: 36px repeat(24, 1fr);
+    gap: 3px;
+  }
+  .hour-heatmap .hm-row-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-mute);
+    align-self: center;
+    padding-right: 8px;
+    text-align: right;
+  }
+  .insight-card.dark .hour-heatmap .hm-row-label { color: rgba(255,255,255,.5); }
+  .hour-heatmap .hour-label {
+    font-family: var(--mono);
+    font-size: 8.5px;
+    color: var(--ink-mute);
+    text-align: center;
+    padding-bottom: 4px;
+    letter-spacing: .04em;
+  }
+  .insight-card.dark .hour-heatmap .hour-label { color: rgba(255,255,255,.45); }
+  .hour-cell {
+    height: 22px;
+    border-radius: 4px;
+    background: rgba(0,0,0,.05);
+    cursor: pointer;
+    transition: all .15s;
+    position: relative;
+  }
+  .insight-card.dark .hour-cell { background: rgba(255,255,255,.05); }
+  .hour-cell:hover { transform: scale(1.15); z-index: 3; }
+  .hour-cell.l1 { background: #d4d4d8; }
+  .hour-cell.l2 { background: #a1a1aa; }
+  .hour-cell.l3 { background: #52525b; }
+  .hour-cell.l4 { background: #0a0a0a; }
+  .insight-card.dark .hour-cell.l1 { background: rgba(255,255,255,.18); }
+  .insight-card.dark .hour-cell.l2 { background: rgba(255,255,255,.4); }
+  .insight-card.dark .hour-cell.l3 { background: rgba(255,255,255,.7); }
+  .insight-card.dark .hour-cell.l4 { background: #ffffff; }
+
+  .hour-summary {
+    margin-top: 22px;
+    padding-top: 22px;
+    border-top: 1px solid var(--line);
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 18px;
+  }
+  .insight-card.dark .hour-summary { border-color: rgba(255,255,255,.08); }
+  .hour-summary .item .lbl {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: .2em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    margin-bottom: 6px;
+  }
+  .insight-card.dark .hour-summary .item .lbl { color: rgba(255,255,255,.5); }
+  .hour-summary .item .v {
+    font-family: var(--sans);
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: -.025em;
+  }
+  .hour-summary .item .v em {
+    font-style: normal;
+    font-weight: 400;
+    color: var(--ink-mute);
+  }
+  .insight-card.dark .hour-summary .item .v em { color: rgba(255,255,255,.5); }
+
+  /* ============== DAY DETAIL ============== */
+  .day-detail {
+    background: rgba(0,0,0,.03);
+    border-radius: var(--r-md);
+    padding: 22px 24px;
+    margin-top: 22px;
+  }
+  .insight-card.dark .day-detail { background: rgba(255,255,255,.04); }
+  .day-detail-head {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin-bottom: 16px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  .insight-card.dark .day-detail-head { border-color: rgba(255,255,255,.08); }
+  .day-detail-head h4 {
+    margin: 0;
+    font-family: var(--sans);
+    font-size: 22px;
+    font-weight: 400;
+    letter-spacing: -.02em;
+  }
+  .day-detail-head h4 em {  }
+  .day-detail-head .meta {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-mute);
+  }
+  .insight-card.dark .day-detail-head .meta { color: rgba(255,255,255,.5); }
+  .day-detail .pill-stat {
+    margin-left: auto;
+    background: var(--black);
+    color: #fff;
+    padding: 4px 12px;
+    border-radius: 999px;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 500;
+  }
+  .insight-card.dark .day-detail .pill-stat { background: #fff; color: var(--black); }
+  .completed-list { list-style: none; padding: 0; margin: 0; }
+  .completed-list li {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 11px 0;
+    font-size: 13px;
+    color: var(--ink);
+    border-top: 1px solid var(--line);
+  }
+  .insight-card.dark .completed-list li { color: rgba(255,255,255,.85); border-color: rgba(255,255,255,.06); }
+  .completed-list li:first-child { border-top: 0; }
+  .completed-list .checkmark {
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: var(--black);
+    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    flex-shrink: 0;
+  }
+  .insight-card.dark .completed-list .checkmark { background: #fff; color: var(--black); }
+  .completed-list .missed {
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    border: 1.5px solid var(--line-strong);
+    flex-shrink: 0;
+  }
+  .insight-card.dark .completed-list .missed { border-color: rgba(255,255,255,.15); }
+  .completed-list li.is-missed { color: var(--ink-mute); }
+  .completed-list li.is-missed .task-name { text-decoration: line-through; }
+  .completed-list .task-name { flex: 1; }
+  .completed-list .time {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-mute);
+    font-weight: 500;
+  }
+  .insight-card.dark .completed-list .time { color: rgba(255,255,255,.5); }
+
+  /* ============== CALENDAR VIEW (ring-based goal vs work) ============== */
+  .calendar-card {
+    border-radius: var(--r-xl);
+    padding: 26px 28px;
+    background: var(--black);
+    color: #fff;
+    border: 1px solid rgba(255,255,255,.06);
+  }
+  .cal-head {
+    display: flex;
+    align-items: baseline;
+    margin-bottom: 24px;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .cal-head h3 {
+    margin: 0;
+    font-family: var(--sans);
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -.03em;
+  }
+  .cal-head h3 em {
+    font-style: normal;
+    font-weight: 300;
+    color: rgba(255,255,255,.55);
+  }
+  .cal-head .sub {
+    font-family: var(--sans);
+    font-weight: 400;
+    color: rgba(255,255,255,.5);
+    font-size: 12px;
+  }
+  .cal-head .nav-arrows {
+    margin-left: auto;
+    display: flex;
+    gap: 6px;
+  }
+  .cal-arrow {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    background: rgba(255,255,255,.08);
+    border: 0;
+    color: #fff;
+    cursor: pointer;
+    font-size: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .cal-arrow:hover { background: rgba(255,255,255,.14); }
+
+  /* Goal config row — per-day editable targets (BLACK card to match calendar) */
+  .goal-config {
+    background: var(--black);
+    color: #fff;
+    border: 1px solid rgba(255,255,255,.06);
+    border-radius: var(--r-lg);
+    padding: 22px 24px;
+    margin-bottom: 14px;
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.06),
+      0 8px 24px rgba(0,0,0,.12);
+  }
+  .goal-config-head {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    margin-bottom: 18px;
+    flex-wrap: wrap;
+  }
+  .goal-config-head .gc-title {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,.55);
+  }
+  .goal-config-head .gc-week-total {
+    font-family: var(--sans);
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: -.025em;
+    color: #fff;
+  }
+  .goal-config-head .gc-week-total em {
+    font-style: normal;
+    font-weight: 300;
+    font-size: 14px;
+    color: rgba(255,255,255,.55);
+    margin-left: 4px;
+  }
+  .goal-config-head .gc-presets {
+    margin-left: auto;
+    display: inline-flex;
+    gap: 4px;
+    background: rgba(255,255,255,.06);
+    border-radius: 999px;
+    padding: 3px;
+  }
+  .goal-config-head .gc-preset {
+    background: transparent;
+    border: 0;
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-family: var(--sans);
+    font-size: 12px;
+    color: rgba(255,255,255,.65);
+    cursor: pointer;
+    font-weight: 500;
+    transition: color .15s;
+  }
+  .goal-config-head .gc-preset:hover { color: #fff; }
+  .goal-config-head .gc-preset.active {
+    background: #fff;
+    color: var(--black);
+    font-weight: 600;
+  }
+
+  .day-targets {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 8px;
+  }
+  .day-target {
+    background: rgba(255,255,255,.06);
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: var(--r-md);
+    padding: 14px 8px 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    transition: all .15s;
+  }
+  .day-target:hover {
+    background: rgba(255,255,255,.1);
+    border-color: rgba(255,255,255,.14);
+  }
+  .day-target.zero {
+    background: rgba(255,255,255,.02);
+    border-color: rgba(255,255,255,.04);
+  }
+  .day-target.zero .dt-day { color: rgba(255,255,255,.3); }
+  .day-target.zero .dt-input { color: rgba(255,255,255,.35); }
+  .day-target.zero .dt-unit { color: rgba(255,255,255,.3); }
+  .day-target .dt-day {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,.55);
+    font-weight: 600;
+  }
+  .day-target .dt-input-wrap {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 3px;
+  }
+  .day-target .dt-input {
+    width: 44px;
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid rgba(255,255,255,.18);
+    color: #fff;
+    font-family: var(--sans);
+    font-size: 26px;
+    font-weight: 700;
+    text-align: center;
+    outline: none;
+    padding: 2px 0 4px;
+    letter-spacing: -.025em;
+    transition: border-color .15s;
+    -moz-appearance: textfield;
+  }
+  .day-target .dt-input::-webkit-outer-spin-button,
+  .day-target .dt-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  .day-target .dt-input:focus { border-color: #fff; }
+  .day-target .dt-unit {
+    font-family: var(--sans);
+    font-size: 12px;
+    color: rgba(255,255,255,.55);
+    font-weight: 500;
+  }
+
+  .cal-totals {
+    display: flex;
+    gap: 36px;
+    margin-bottom: 22px;
+    padding-bottom: 22px;
+    border-bottom: 1px solid rgba(255,255,255,.08);
+    flex-wrap: wrap;
+  }
+  .cal-total {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .cal-total .lbl {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,.45);
+  }
+  .cal-total .v {
+    font-family: var(--sans);
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -.025em;
+  }
+  .cal-total .v em {
+    font-style: normal;
+    font-weight: 300;
+    font-size: 14px;
+    color: rgba(255,255,255,.55);
+    margin-left: 4px;
+  }
+  .cal-total.projected { margin-left: auto; text-align: right; }
+
+  .cal-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 6px;
+  }
+  .cal-day-name {
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: .2em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,.4);
+    padding-bottom: 12px;
+  }
+
+  /* The calendar cell with ring */
+  .cal-cell {
+    aspect-ratio: 1;
+    position: relative;
+    cursor: pointer;
+    border-radius: 12px;
+    background: transparent;
+    transition: background .15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .cal-cell.empty { cursor: default; }
+  .cal-cell:not(.empty):hover { background: rgba(255,255,255,.04); }
+
+  /* The ring SVG positioned to fill the cell */
+  .cal-ring {
+    position: absolute;
+    inset: 8%;
+    transform: rotate(-90deg);
+  }
+  .cal-ring circle {
+    transition: stroke-dashoffset .4s ease, stroke-width .25s ease;
+  }
+  .cal-ring .ring-track {
+    stroke: rgba(255,255,255,.1);
+    fill: none;
+  }
+  .cal-ring .ring-fill {
+    stroke: rgba(255,255,255,.85);
+    fill: none;
+    stroke-linecap: round;
+  }
+  .cal-cell.over .cal-ring .ring-fill {
+    stroke: #ffffff;
+    stroke-width: 5 !important;
+    filter: drop-shadow(0 0 8px rgba(255,255,255,.5));
+  }
+  .cal-cell.over .cal-ring .ring-track {
+    stroke: rgba(255,255,255,.2);
+    stroke-width: 5 !important;
+  }
+  .cal-cell.partial .cal-ring .ring-fill {
+    stroke: rgba(255,255,255,.55);
+  }
+
+  /* The number in center */
+  .cal-num {
+    position: relative;
+    z-index: 2;
+    font-family: var(--sans);
+    font-size: 13px;
+    font-weight: 500;
+    color: #fff;
+    line-height: 1;
+  }
+  .cal-cell.empty .cal-num { color: rgba(255,255,255,.85); }
+  .cal-cell.no-data .cal-num { color: rgba(255,255,255,.95); font-weight: 500; }
+  .cal-cell.is-today .cal-num {
+    color: #fff;
+    font-weight: 700;
+  }
+  .cal-cell.is-today {
+    background: rgba(255,255,255,.06);
+  }
+  .cal-cell.is-today .cal-ring .ring-track {
+    stroke: rgba(255,255,255,.18);
+  }
+
+  /* Tiny hours readout below number for non-empty days, hidden until hover */
+  .cal-hours {
+    position: absolute;
+    bottom: 10%;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: var(--mono);
+    font-size: 9px;
+    color: rgba(255,255,255,.55);
+    z-index: 2;
+    opacity: 0;
+    transition: opacity .15s;
+    white-space: nowrap;
+    letter-spacing: .04em;
+  }
+  .cal-cell:hover .cal-hours { opacity: 1; }
+  .cal-cell.is-today .cal-hours { opacity: 1; }
+
+  
+  .cal-cell.rest-day { opacity: .45; }
+  .cal-cell.rest-bonus .cal-ring .ring-fill {
+    stroke: #ffffff;
+    filter: drop-shadow(0 0 8px rgba(255,255,255,.6));
+  }
+  .cal-cell.rest-bonus .cal-num {
+    color: #fff;
+    font-weight: 700;
+  }
+
+  .cal-legend {
+    margin-top: 26px;
+    padding-top: 22px;
+    border-top: 1px solid rgba(255,255,255,.08);
+    display: flex;
+    gap: 28px;
+    font-family: var(--sans);
+    font-size: 12px;
+    color: rgba(255,255,255,.65);
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .cal-legend .lg-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .cal-legend svg {
+    width: 22px; height: 22px;
+  }
+  .cal-legend svg circle.t { stroke: rgba(255,255,255,.12); fill: none; stroke-width: 2; }
+  .cal-legend svg circle.f-half { stroke: rgba(255,255,255,.55); fill: none; stroke-width: 2; stroke-linecap: round; }
+  .cal-legend svg circle.f-full { stroke: rgba(255,255,255,.85); fill: none; stroke-width: 2; stroke-linecap: round; }
+  .cal-legend svg circle.f-over { stroke: #fff; fill: none; stroke-width: 3; stroke-linecap: round; filter: drop-shadow(0 0 4px rgba(255,255,255,.4)); }
+  .cal-legend .lg-spacer { color: rgba(255,255,255,.3); margin: 0 4px; }
+  .cal-legend .lg-foot {
+    margin-left: auto;
+    color: rgba(255,255,255,.45);
+    font-size: 11px;
+  }
+
+  .cal-week-totals {
+    margin-top: 26px;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
+    gap: 8px;
+  }
+  .cal-week-totals .week {
+    background: rgba(255,255,255,.04);
+    border-radius: var(--r-md);
+    padding: 12px 14px;
+  }
+  .cal-week-totals .week .wlbl {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: rgba(255,255,255,.4);
+    letter-spacing: .12em;
+  }
+  .cal-week-totals .week .wv {
+    font-family: var(--sans);
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -.02em;
+    margin-top: 4px;
+  }
+  .cal-week-totals .week .wv em {
+    font-style: normal;
+    font-weight: 300;
+    font-size: 12px;
+    color: rgba(255,255,255,.45);
+    margin-left: 2px;
+  }
+  .cal-week-totals .week .wbar {
+    height: 3px;
+    background: rgba(255,255,255,.08);
+    border-radius: 999px;
+    margin-top: 10px;
+    overflow: hidden;
+  }
+  .cal-week-totals .week .wbar .wfill {
+    height: 100%;
+    background: #fff;
+    border-radius: 999px;
+  }
+
+  /* ============== VIEW HOLDERS ============== */
+  .view-section { display: none; }
+  .view-section.active { display: block; }
+
+  .h1 {
+    font-family: var(--sans);
+    font-size: 48px;
+    font-weight: 700;
+    letter-spacing: -.035em;
+    margin: 0 0 6px;
+    line-height: 1;
+  }
+  .h1 em {
+    font-style: normal;
+    font-weight: 300;
+    color: var(--ink-mute);
+  }
+  .sub-line {
+    color: var(--ink-mute);
+    font-size: 13px;
+    margin: 0 0 28px;
+    font-family: var(--sans);
+    font-weight: 400;
+  }
+</style>
+</head>
+<body>
+
+<!-- ============== TOP NAVIGATION OF PROTOTYPE ============== -->
+<div class="proto-nav">
+  <span class="label">Prototype</span>
+  <button class="proto-tab active" data-view="board">Board</button>
+  <button class="proto-tab" data-view="list">List by project</button>
+  <button class="proto-tab" data-view="priority">Priority</button>
+  <button class="proto-tab" data-view="create">Create task</button>
+  <button class="proto-tab" data-view="projects">Manage projects</button>
+  <button class="proto-tab" data-view="calendar">Calendar · NEW</button>
+  <button class="proto-tab" data-view="insights">Insights</button>
+  <span class="label" style="margin-left:auto">Press Ctrl+K to quick-add</span>
+</div>
+
+<!-- ============================================================ -->
+<!-- VIEW 1 — BOARD                                                 -->
+<!-- ============================================================ -->
+<div class="view-section active" id="view-board">
+  <div class="app">
+
+    <header class="header">
+      <div class="brand">
+        <span class="brand-mark">G</span>
+        <span class="brand-name">Get-it-<em>done</em></span>
+      </div>
+      <div class="header-pills">
+        <button class="qa-trigger" onclick="openQuickAdd()">
+          <span class="qa-plus">+</span>
+          Quick add
+          <span class="qa-kbd">Ctrl + K</span>
+        </button>
+        <button class="pill bell">🔔</button>
+        <button class="pill">Categories <span class="num">06</span></button>
+        <button class="pill">Projects <span class="num">11</span></button>
+        <button class="pill">Tags <span class="num">09</span></button>
+        <button class="pill dark">Insights</button>
+      </div>
+    </header>
+
+    <div class="title-row">
+      <h1>Today's <em>intent</em>.</h1>
+      <div class="title-meta">
+        <span class="title-date">
+          <span class="live-dot"></span>
+          SAT, APR 25 · LIVE
+        </span>
+      </div>
+    </div>
+
+<div class="now-tracking">
+      <div class="nt-status">
+        <div class="nt-label">
+          <span class="nt-pulse"></span>
+          Now tracking
+        </div>
+        <div class="nt-task-name">Updates in Get-it-done</div>
+        <div class="nt-task-meta">
+          <strong>get-it-done</strong> · DEVELOPMENT · MED PRIORITY
+        </div>
+      </div>
+      <div class="nt-spacer"></div>
+      <div class="nt-timer">
+        <div class="nt-time" id="nt-time">00:47<span class="ms">:23</span></div>
+        <div class="nt-session">SESSION · STARTED 47M AGO</div>
+      </div>
+      <div class="nt-controls">
+        <button class="nt-btn focus"><span class="icon">↗</span> Focus</button>
+        <button class="nt-btn"><span class="icon">⏸</span> Pause</button>
+        <button class="nt-btn stop"><span class="icon">⏹</span> Stop</button>
+      </div>
+    </div>
+
+    <div class="today-grid">
+      <div class="today-card glass-dark dark">
+        <div>
+          <div class="label">Today's 5</div>
+        </div>
+        <div>
+          <div class="big">1<span class="of">of 5</span></div>
+          <div class="progress-track"><div class="fill"></div></div>
+        </div>
+      </div>
+      <div class="today-card glass">
+        <div class="label">Streak</div>
+        <div class="today-stat-block">
+          <div class="v streak-num">🔥<em>3</em></div>
+          <span style="font-family: var(--sans);  color: var(--ink-mute); font-size: 13px; padding-bottom: 4px;">days · best 11</span>
+        </div>
+        <svg class="spark" viewBox="0 0 200 28" preserveAspectRatio="none">
+          <polyline points="0,22 25,18 50,14 75,8 100,12 125,4 150,10 175,6 200,9" fill="none" stroke="#0a0a0a" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="today-card glass">
+        <div class="label">Tracked today</div>
+        <div class="today-stat-block">
+          <div class="v">1<em>h</em> 24<em>m</em></div>
+        </div>
+        <svg class="spark" viewBox="0 0 200 28" preserveAspectRatio="none">
+          <polyline points="0,24 25,20 50,16 75,12 100,18 125,8 150,14 175,6 200,4" fill="none" stroke="#0a0a0a" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </div>
+    </div>
+
+    <div class="callout">
+      <h3>What's new on this view</h3>
+      <ul>
+        <li><strong>Change #1</strong> — Status auto-derives from work logged. "In Progress" only shows tasks with time tracked on the task or any subtask.</li>
+        <li><strong>Change #4</strong> — Filter bar with sticky tag inheritance. Set filters once; new tasks created on this filtered view auto-tag themselves.</li>
+      </ul>
+    </div>
+
+    <div class="view-row">
+      <div class="view-tabs">
+        <button class="view-tab active">Board</button>
+        <button class="view-tab" onclick="switchView('list')">List</button>
+        <button class="view-tab">Schedule</button>
+        <button class="view-tab" onclick="switchView('calendar')">Calendar</button>
+        <button class="view-tab new" onclick="switchView('priority')">Priority</button>
+      </div>
+      <div class="status-tabs">
+        <button class="status-tab">To do <span class="badge">14</span></button>
+        <button class="status-tab active">In progress <span class="badge">03</span></button>
+        <button class="status-tab">Done <span class="badge">11</span></button>
+      </div>
+    </div>
+
+    <div class="filter-bar">
+      <span class="label">Filters</span>
+      <span class="filter-chip">
+        <span class="key">project</span> get-it-done
+        <span class="x">×</span>
+      </span>
+      <span class="filter-chip">
+        <span class="key">category</span> development
+        <span class="x">×</span>
+      </span>
+      <button class="filter-add">+ Add filter</button>
+      <div class="saved-views">
+        <select>
+          <option>Untitled view</option>
+          <option>Get-it-done · Dev</option>
+          <option>Allianza · Outreach</option>
+          <option>Komal.YT · Content</option>
+        </select>
+        <button class="save-view-btn">Save</button>
+      </div>
+    </div>
+
+    <div class="filter-explainer">
+      <strong>Heads up</strong>
+      <span>New tasks created from this filtered view auto-inherit <strong>get-it-done</strong> + <strong>development</strong>. You can still edit them before saving.</span>
+    </div>
+
+    <div class="add-task-row" onclick="switchView('create')">
+      <span class="plus">+</span>
+      <span>Add task — will inherit <strong style="color:var(--black)">get-it-done</strong> + <strong style="color:var(--black)">development</strong></span>
+    </div>
+
+    <div class="task active-tracking">
+      <div class="task-head">
+        <span class="checkbox"></span>
+        <span class="timer-icon">⏱</span>
+        <span class="toggle-arrow">▼</span>
+        <span class="task-title">Updates in Get-it-done</span>
+        <span class="task-total-time live">
+          <span class="v">47m 23s</span>
+          <span class="lbl">TOTAL TRACKED</span>
+        </span>
+        <div class="task-actions">
+          <button class="icon-btn play running">▶</button>
+          <button class="icon-btn">★</button>
+          <button class="icon-btn">📅</button>
+          <button class="icon-btn">✎</button>
+          <button class="icon-btn">×</button>
+        </div>
+      </div>
+      <div class="task-meta">
+        <span class="tag priority priority-med">MED</span>
+        <span class="tag"><span class="dot"></span>development</span>
+        <span class="tag"><span class="dot"></span>get-it-done</span>
+        <span class="tag tag-generic">developing new app</span>
+      </div>
+      <div class="why-here">
+        ↳ <strong>In Progress</strong> — 1 of 3 subtasks has time logged
+      </div>
+      <div class="task-progress">
+        <div class="progress-bar-task"><div class="fill" style="width:33%"></div></div>
+        <span class="pct">33%</span>
+        <span>1/3 SUBTASKS</span>
+      </div>
+      <div class="task-time-rollup">
+        <span class="lbl">Time breakdown</span>
+        <div class="breakdown">
+          <div class="seg" style="width:100%; max-width: 60%;" title="47m 23s — Status auto-derive"></div>
+          <span>1 of 3 subtasks worked</span>
+        </div>
+        <span class="total">47m 23s</span>
+      </div>
+      <div class="subtasks">
+        <div class="subtask done">
+          <span class="checkbox checked"></span>
+          <span>Status auto-derive from time logged</span>
+          <span class="subtask-time"><span class="v live">47m 23s</span></span>
+        </div>
+        <div class="subtask">
+          <span class="checkbox"></span>
+          <span>Project lifecycle (active / completed / archived)</span>
+          <span class="subtask-time"><span class="v zero">0s</span></span>
+        </div>
+        <div class="subtask">
+          <span class="checkbox"></span>
+          <span>Drop the "Done" button on dropdowns</span>
+          <span class="subtask-time"><span class="v zero">0s</span></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="task">
+      <div class="task-head">
+        <span class="checkbox"></span>
+        <span class="timer-icon">⏱</span>
+        <span class="task-title">Filter bar + saved views</span>
+        <span class="task-total-time">
+          <span class="v">22m 04s</span>
+          <span class="lbl">TOTAL TRACKED</span>
+        </span>
+        <div class="task-actions">
+          <button class="icon-btn play">▶</button>
+          <button class="icon-btn">★</button>
+          <button class="icon-btn">📅</button>
+          <button class="icon-btn">✎</button>
+          <button class="icon-btn">×</button>
+        </div>
+      </div>
+      <div class="task-meta">
+        <span class="tag priority priority-urgent">URGENT</span>
+        <span class="tag"><span class="dot"></span>development</span>
+        <span class="tag"><span class="dot"></span>get-it-done</span>
+      </div>
+      <div class="why-here">
+        ↳ <strong>In Progress</strong> — 22m of work logged on this task
+      </div>
+    </div>
+
+    <div class="task bounced">
+      <div class="task-head">
+        <span class="checkbox"></span>
+        <span class="timer-icon">⏱</span>
+        <span class="task-title" style="text-decoration:line-through; color:var(--ink-mute);">Build priority swimlane view</span>
+        <span class="task-total-time">
+          <span class="v zero">0s</span>
+          <span class="lbl">NEVER STARTED</span>
+        </span>
+        <div class="task-actions">
+          <button class="icon-btn play">▶</button>
+          <button class="icon-btn">×</button>
+        </div>
+      </div>
+      <div class="why-here warn">
+        ↳ No time logged — auto-bounced back to <strong>To Do</strong>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- VIEW LIST — projects as squares                                -->
+<!-- ============================================================ -->
+<div class="view-section" id="view-list">
+  <div class="app">
+
+    <header class="header">
+      <div class="brand">
+        <span class="brand-mark">G</span>
+        <span class="brand-name">Get-it-<em>done</em></span>
+      </div>
+      <div class="header-pills">
+        <button class="qa-trigger" onclick="openQuickAdd()">
+          <span class="qa-plus">+</span>
+          Quick add
+          <span class="qa-kbd">Ctrl + K</span>
+        </button>
+        <button class="pill bell">🔔</button>
+        <button class="pill">Categories <span class="num">06</span></button>
+        <button class="pill">Projects <span class="num">11</span></button>
+        <button class="pill dark" onclick="switchView('insights')">Insights</button>
+      </div>
+    </header>
+
+    <div class="title-row">
+      <h1>By <em>project</em>.</h1>
+      <div class="title-meta">
+        <span class="title-date">8 ACTIVE PROJECTS · 47 OPEN TASKS</span>
+      </div>
+    </div>
+
+    <div class="callout">
+      <h3>What's new on this view</h3>
+      <ul>
+        <li><strong>Reorganized</strong> — tasks grouped by project as square cards instead of a flat list. Scan by project, not by task.</li>
+        <li>Each project shows a progress bar, time tracked, open tasks count, and its inline task list.</li>
+        <li>The black card highlights the project you're <strong>actively working on right now</strong>.</li>
+      </ul>
+    </div>
+
+    <div class="view-row">
+      <div class="view-tabs">
+        <button class="view-tab" onclick="switchView('board')">Board</button>
+        <button class="view-tab active">List</button>
+        <button class="view-tab">Schedule</button>
+        <button class="view-tab" onclick="switchView('calendar')">Calendar</button>
+        <button class="view-tab new" onclick="switchView('priority')">Priority</button>
+      </div>
+    </div>
+
+    <div class="list-toolbar">
+      <div class="group-by">
+        <button class="active">Group by project</button>
+        <button>Group by category</button>
+        <button>Flat list</button>
+      </div>
+      <div class="sort-by">
+        Sort
+        <select>
+          <option>by progress</option>
+          <option>by recently worked</option>
+          <option>by total time</option>
+          <option>alphabetical</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="list-grid">
+
+      <!-- FEATURED: actively-worked project = black card -->
+      <div class="project-square featured">
+        <div class="ps-head">
+          <div class="ps-meta">
+            <span class="ps-status-dot"></span>
+            <span class="ps-status-label">Active now</span>
+            <span class="ps-count">14 tasks</span>
+          </div>
+          <h3 class="ps-title">allianza-biz</h3>
+          <p class="ps-subtitle">Healthcare automation · Germany / Poland</p>
+          <div class="ps-progress-row">
+            <div class="ps-progress-bar"><div class="fill" style="width:62%"></div></div>
+            <span class="ps-progress-pct">62%</span>
+          </div>
+          <div class="ps-stats">
+            <div class="ps-stat">
+              <span class="lbl">Tracked</span>
+              <span class="v">18<em>h</em></span>
+            </div>
+            <div class="ps-stat">
+              <span class="lbl">Open</span>
+              <span class="v">8<em>tasks</em></span>
+            </div>
+            <div class="ps-stat">
+              <span class="lbl">Done</span>
+              <span class="v">6<em>tasks</em></span>
+            </div>
+          </div>
+        </div>
+        <div class="ps-tasks">
+          <div class="ps-task">
+            <span class="checkbox"></span>
+            <span class="ps-task-cat-dot outreach" title="outreach"></span>
+            <span class="ps-task-prio urg">URG</span>
+            <span class="ps-task-title">Reply to Dr. Schmidt cold email lead</span>
+            <span class="ps-task-time has-time">22m</span>
+          </div>
+          <div class="ps-task">
+            <span class="checkbox"></span>
+            <span class="ps-task-cat-dot dev" title="development"></span>
+            <span class="ps-task-prio urg">URG</span>
+            <span class="ps-task-title">Fix VPS deploy failing on KomalFi</span>
+            <span class="ps-task-time">0s</span>
+          </div>
+          <div class="ps-task">
+            <span class="checkbox"></span>
+            <span class="ps-task-cat-dot outreach" title="outreach"></span>
+            <span class="ps-task-prio urg">URG</span>
+            <span class="ps-task-title">Send GDPR one-pager to 5 Berlin clinics</span>
+            <span class="ps-task-due overdue">due Apr 23</span>
+          </div>
+          <div class="ps-task">
+            <span class="checkbox"></span>
+            <span class="ps-task-cat-dot outreach" title="outreach"></span>
+            <span class="ps-task-prio med">MED</span>
+            <span class="ps-task-title">Launch email campaign for first 50 leads</span>
+            <span class="ps-task-time">0s</span>
+          </div>
+          <div class="ps-task">
+            <span class="checkbox"></span>
+            <span class="ps-task-cat-dot dev" title="development"></span>
+            <span class="ps-task-prio med">MED</span>
+            <span class="ps-task-title">Polish CRM pipeline drag-drop perf</span>
+            <span class="ps-task-time has-time">28m</span>
+          </div>
+          <div class="ps-task">
+            <span class="checkbox"></span>
+            <span class="ps-task-cat-dot outreach" title="outreach"></span>
+            <span class="ps-task-prio med">MED</span>
+            <span class="ps-task-title">Review Instantly.ai analytics — Poland batch</span>
+          </div>
+          <div class="ps-task done">
+            <span class="checkbox checked"></span>
+            <span class="ps-task-cat-dot outreach" title="outreach"></span>
+            <span class="ps-task-title">Scrape 50 high-intent leads from Apollo.io</span>
+            <span class="ps-task-time has-time">1h 32m</span>
+          </div>
+          <div class="ps-task done">
+            <span class="checkbox checked"></span>
+            <span class="ps-task-cat-dot dev" title="development"></span>
+            <span class="ps-task-title">CRM normalization plan — companies / leads</span>
+            <span class="ps-task-time has-time">2h 14m</span>
+          </div>
+        </div>
+        <button class="ps-add">+ Add task to allianza-biz</button>
+      </div>
+
+      <!-- get-it-done -->
+      <div class="project-square">
+        <div class="ps-head">
+          <div class="ps-meta">
+            <span class="ps-status-dot"></span>
+            <span class="ps-status-label">Active</span>
+            <span class="ps-count">5 tasks</span>
+          </div>
+          <h3 class="ps-title">get-it-done</h3>
+          <p class="ps-subtitle">Productivity app · this app you're using</p>
+          <div class="ps-progress-row">
+            <div class="ps-progress-bar"><div class="fill" style="width:33%"></div></div>
+            <span class="ps-progress-pct">33%</span>
+          </div>
+          <div class="ps-stats">
+            <div class="ps-stat">
+              <span class="lbl">Tracked</span>
+              <span class="v">4<em>h 22m</em></span>
+            </div>
+            <div class="ps-stat">
+              <span class="lbl">Open</span>
+              <span class="v">5<em>tasks</em></span>
+            </div>
+            <div class="ps-stat">
+              <span class="lbl">Done</span>
+              <span class="v">2<em>tasks</em></span>
+            </div>
+          </div>
+        </div>
+        <div class="ps-tasks">
+          <div class="ps-task">
+            <span class="checkbox"></span>
+            <span class="ps-task-cat-dot dev"></span>
+            <span class="ps-task-prio urg">URG</span>
+            <span class="ps-task-title">Filter bar + saved views</span>
+            <span class="ps-task-time has-time">22m</span>
+          </div>
+          <div class="ps-task">
+            <span class="checkbox"></span>
+            <span class="ps-task-cat-dot dev"></span>
+            <span class="ps-task-prio med">MED</span>
+            <span class="ps-task-title">Status auto-derive from time logged</span>
+            <span class="ps-task-time has-time">47m</span>
+          </div>
+          <div class="ps-task">
+            <span class="checkbox"></span>
+            <span class="ps-task-cat-dot dev"></span>
+            <span class="ps-task-prio med">MED</span>
+            <span class="ps-task-title">Project lifecycle (active / completed / archived)</span>
+          </div>
+          <div class="ps-task">
+            <span class="checkbox"></span>
+            <span class="ps-task-cat-dot dev"></span>
+            <span class="ps-task-prio low">LOW</span>
+            <span class="ps-task-title">Drop the "Done" button on dropdowns</span>
+          </div>
+          <div class="ps-task">
+            <span class="checkbox"></span>
+            <span class="ps-task-cat-dot dev"></span>
+            <span class="ps-task-prio low">LOW</span>
+            <span class="ps-task-title">Build priority swimlane view</span>
+          </div>
+        </div>
+        <button class="ps-add">+ Add task</button>
+      </div>
+
+      <!-- komalfi -->
+      <div class="project-square">
+        <div class="ps-head">
+          <div class="ps-meta">
+            <span class="ps-status-dot"></span>
+            <span class="ps-status-label">Active</span>
+            <span class="ps-count">9 tasks</span>
+          </div>
+          <h3 class="ps-title">komalfi</h3>
+          <p class="ps-subtitle">Personal finance app</p>
+          <div class="ps-progress-row">
+            <div class="ps-progress-bar"><div class="fill" style="width:45%"></div></div>
+            <span class="ps-progress-pct">45%</span>
+          </div>
+          <div class="ps-stats">
+            <div class="ps-stat">
+              <span class="lbl">Tracked</span>
+              <span class="v">11<em>h</em></span>
+            </div>
+            <div class="ps-stat">
+              <span class="lbl">Open</span>
+              <span class="v">5<em>tasks</em></span>
+            </div>
+            <div class="ps-stat">
+              <span class="lbl">Done</span>
+              <span class="v">4<em>tasks</em></span>
+            </div>
+          </div>
+        </div>
+        <div class="ps-tasks">
+          <div class="ps-task">
+            <span class="checkbox"></span>
+            <span class="ps-task-cat-dot dev"></span>
+            <span class="ps-task-prio urg">URG</span>
+            <span class="ps-task-title">BNPL/EMI tracker — bug fix</span>
+            <span class="ps-task-time has-time">59m</span>
+          </div>
+          <div class="ps-task">
+            <span class="checkbox"></span>
+            <span class="ps-task-cat-dot dev"></span>
+            <span class="ps-task-prio med">MED</span>
+            <span class="ps-task-title">Mobile sync via Supabase realtime</span>
+          </div>
+          <div class="ps-task">
+            <span class="checkbox"></span>
+            <span class="ps-task-cat-dot dev"></span>
+            <span class="ps-task-prio med">MED</span>
+            <span class="ps-task-title">Transaction reconciliation — Claude Vision</span>
+          </div>
+          <div class="ps-task">
+            <span class="checkbox"></span>
+            <span class="ps-task-cat-dot dev"></span>
+            <span class="ps-task-prio low">LOW</span>
+            <span class="ps-task-title">Polish business finance module</span>
+          </div>
+          <div class="ps-task">
+            <span class="checkbox"></span>
+            <span class="ps-task-cat-dot dev"></span>
+            <span class="ps-task-prio low">LOW</span>
+            <span class="ps-task-title">Debt-expense sync improvements</span>
+          </div>
+        </div>
+        <button class="ps-add">+ Add task</button>
+      </div>
+
+      <!-- theaigirlhere -->
+      <div class="project-square">
+        <div class="ps-head">
+          <div class="ps-meta">
+            <span class="ps-status-dot"></span>
+            <span class="ps-status-label">Active</span>
+            <span class="ps-count">6 tasks</span>
+          </div>
+          <h3 class="ps-title">theaigirlhere</h3>
+          <p class="ps-subtitle">YT + IG content for Indian dev community</p>
+          <div class="ps-progress-row">
+            <div class="ps-progress-bar"><div class="fill" style="width:28%"></div></div>
+            <span class="ps-progress-pct">28%</span>
+          </div>
+          <div class="ps-stats">
+            <div class="ps-stat">
+              <span class="lbl">Tracked</span>
+              <span class="v">7<em>h</em></span>
+            </div>
+            <div class="ps-stat">
+              <span class="lbl">Open</span>
+              <span class="v">4<em>tasks</em></span>
+            </div>
+            <div class="ps-stat">
+              <span class="lbl">Done</span>
+              <span class="v">2<em>tasks</em></span>
+            </div>
+          </div>
+        </div>
+        <div class="ps-tasks">
+          <div class="ps-task">
+            <span class="checkbox"></span>
+            <span class="ps-task-cat-dot content"></span>
+            <span class="ps-task-prio urg">URG</span>
+            <span class="ps-task-title">Record YouTube video on Claude Code skills</span>
+            <span class="ps-task-due overdue">due Apr 24</span>
+          </div>
+          <div class="ps-task">
+            <span class="checkbox"></span>
+            <span class="ps-task-cat-dot content"></span>
+            <span class="ps-task-prio med">MED</span>
+            <span class="ps-task-title">IG carousel: 7 underrated Claude features</span>
+          </div>
+          <div class="ps-task">
+            <span class="checkbox"></span>
+            <span class="ps-task-cat-dot content"></span>
+            <span class="ps-task-prio med">MED</span>
+            <span class="ps-task-title">Plan first YT video — edits with Claude design</span>
+          </div>
+          <div class="ps-task">
+            <span class="checkbox"></span>
+            <span class="ps-task-cat-dot content"></span>
+            <span class="ps-task-prio low">LOW</span>
+            <span class="ps-task-title">Telegram approval workflow polish</span>
+          </div>
+        </div>
+        <button class="ps-add">+ Add task</button>
+      </div>
+
+      <!-- zakir -->
+      <div class="project-square">
+        <div class="ps-head">
+          <div class="ps-meta">
+            <span class="ps-status-dot"></span>
+            <span class="ps-status-label">Active</span>
+            <span class="ps-count">4 tasks</span>
+          </div>
+          <h3 class="ps-title">zakir</h3>
+          <p class="ps-subtitle">Client work</p>
+          <div class="ps-progress-row">
+            <div class="ps-progress-bar"><div class="fill" style="width:55%"></div></div>
+            <span class="ps-progress-pct">55%</span>
+          </div>
+          <div class="ps-stats">
+            <div class="ps-stat">
+              <span class="lbl">Tracked</span>
+              <span class="v">6<em>h</em></span>
+            </div>
+            <div class="ps-stat">
+              <span class="lbl">Open</span>
+              <span class="v">3<em>tasks</em></span>
+            </div>
+            <div class="ps-stat">
+              <span class="lbl">Done</span>
+              <span class="v">1<em>task</em></span>
+            </div>
+          </div>
+        </div>
+        <div class="ps-tasks">
+          <div class="ps-task done">
+            <span class="checkbox checked"></span>
+            <span class="ps-task-cat-dot admin"></span>
+            <span class="ps-task-title">Amazon registration</span>
+            <span class="ps-task-time has-time">1h</span>
+          </div>
+          <div class="ps-task">
+            <span class="checkbox"></span>
+            <span class="ps-task-cat-dot admin"></span>
+            <span class="ps-task-prio urg">URG</span>
+            <span class="ps-task-title">Get Zakir's Amazon account live & products listed</span>
+            <span class="ps-task-due overdue">due Apr 23</span>
+          </div>
+          <div class="ps-task">
+            <span class="checkbox"></span>
+            <span class="ps-task-cat-dot dev"></span>
+            <span class="ps-task-prio urg">URG</span>
+            <span class="ps-task-title">Working on Zakir website</span>
+          </div>
+          <div class="ps-task">
+            <span class="checkbox"></span>
+            <span class="ps-task-cat-dot outreach"></span>
+            <span class="ps-task-prio med">MED</span>
+            <span class="ps-task-title">Loom templates — generic + dental-specific</span>
+            <span class="ps-task-due overdue">due Apr 24</span>
+          </div>
+        </div>
+        <button class="ps-add">+ Add task</button>
+      </div>
+
+      <!-- gre-prep -->
+      <div class="project-square compact">
+        <div class="ps-head">
+          <div class="ps-meta">
+            <span class="ps-status-dot"></span>
+            <span class="ps-status-label">Active</span>
+            <span class="ps-count">3 tasks</span>
+          </div>
+          <h3 class="ps-title">gre-prep</h3>
+          <p class="ps-subtitle">Graduate study prep</p>
+          <div class="ps-progress-row">
+            <div class="ps-progress-bar"><div class="fill" style="width:12%"></div></div>
+            <span class="ps-progress-pct">12%</span>
+          </div>
+        </div>
+        <div class="ps-tasks">
+          <div class="ps-task">
+            <span class="checkbox"></span>
+            <span class="ps-task-cat-dot learning"></span>
+            <span class="ps-task-prio low">LOW</span>
+            <span class="ps-task-title">Daily verbal — 30 questions</span>
+          </div>
+          <div class="ps-task">
+            <span class="checkbox"></span>
+            <span class="ps-task-cat-dot learning"></span>
+            <span class="ps-task-prio low">LOW</span>
+            <span class="ps-task-title">Quant section 4 review</span>
+          </div>
+          <div class="ps-task">
+            <span class="checkbox"></span>
+            <span class="ps-task-cat-dot learning"></span>
+            <span class="ps-task-prio low">LOW</span>
+            <span class="ps-task-title">AWA practice essay</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- perfume-brand -->
+      <div class="project-square compact">
+        <div class="ps-head">
+          <div class="ps-meta">
+            <span class="ps-status-dot"></span>
+            <span class="ps-status-label">Active</span>
+            <span class="ps-count">2 tasks</span>
+          </div>
+          <h3 class="ps-title">perfume-brand</h3>
+          <p class="ps-subtitle">Side business</p>
+          <div class="ps-progress-row">
+            <div class="ps-progress-bar"><div class="fill" style="width:0%"></div></div>
+            <span class="ps-progress-pct">0%</span>
+          </div>
+        </div>
+        <div class="ps-tasks">
+          <div class="ps-task">
+            <span class="checkbox"></span>
+            <span class="ps-task-cat-dot personal"></span>
+            <span class="ps-task-prio low">LOW</span>
+            <span class="ps-task-title">Sample 3 supplier shortlists</span>
+          </div>
+          <div class="ps-task">
+            <span class="checkbox"></span>
+            <span class="ps-task-cat-dot personal"></span>
+            <span class="ps-task-prio low">LOW</span>
+            <span class="ps-task-title">Brand name moodboard</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Komal.YT -->
+      <div class="project-square compact">
+        <div class="ps-head">
+          <div class="ps-meta">
+            <span class="ps-status-dot"></span>
+            <span class="ps-status-label">Active</span>
+            <span class="ps-count">1 task</span>
+          </div>
+          <h3 class="ps-title">Komal.YT</h3>
+          <p class="ps-subtitle">Personal channel — vlog cuts</p>
+          <div class="ps-progress-row">
+            <div class="ps-progress-bar"><div class="fill" style="width:0%"></div></div>
+            <span class="ps-progress-pct">0%</span>
+          </div>
+        </div>
+        <div class="ps-tasks">
+          <div class="ps-task">
+            <span class="checkbox"></span>
+            <span class="ps-task-cat-dot content"></span>
+            <span class="ps-task-prio low">LOW</span>
+            <span class="ps-task-title">DaVinci color grading practice</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- VIEW 2 — PRIORITY                                              -->
+<!-- ============================================================ -->
+<div class="view-section" id="view-priority">
+  <div class="app">
+
+    <header class="header">
+      <div class="brand">
+        <span class="brand-mark">G</span>
+        <span class="brand-name">Get-it-<em>done</em></span>
+      </div>
+      <div class="header-pills">
+        <button class="pill bell">🔔</button>
+        <button class="pill">Categories <span class="num">06</span></button>
+        <button class="pill">Projects <span class="num">11</span></button>
+        <button class="pill dark">Insights</button>
+      </div>
+    </header>
+
+    <div class="title-row">
+      <h1>By <em>priority</em>.</h1>
+    </div>
+
+    <div class="callout">
+      <h3>What's new on this view</h3>
+      <ul>
+        <li><strong>Change #5</strong> — A new <strong>Priority</strong> view tab. Three swimlanes by urgency. Each lane has its own "+ Add" that auto-stamps the right priority.</li>
+        <li>Filters from the Board view carry over. Saved views work the same way.</li>
+      </ul>
+    </div>
+
+    <div class="view-row">
+      <div class="view-tabs">
+        <button class="view-tab" onclick="switchView('board')">Board</button>
+        <button class="view-tab" onclick="switchView('list')">List</button>
+        <button class="view-tab">Schedule</button>
+        <button class="view-tab" onclick="switchView('calendar')">Calendar</button>
+        <button class="view-tab active new">Priority</button>
+      </div>
+    </div>
+
+    <div class="filter-bar">
+      <span class="label">Filters</span>
+      <span class="filter-chip">
+        <span class="key">project</span> allianza-biz
+        <span class="x">×</span>
+      </span>
+      <button class="filter-add">+ Add filter</button>
+    </div>
+
+    <div class="priority-grid">
+      <div class="priority-col urgent">
+        <div class="priority-col-head">
+          <span class="marker"></span>
+          <span class="name"><em>Urgent</em></span>
+          <span class="count">03</span>
+        </div>
+
+        <div class="task">
+          <div class="task-head">
+            <span class="checkbox"></span>
+            <span class="timer-icon">⏱</span>
+            <span class="task-title">Reply to Dr. Schmidt cold email lead</span>
+          </div>
+          <div class="task-meta">
+            <span class="tag"><span class="dot"></span>outreach</span>
+            <span class="tag"><span class="dot"></span>allianza-biz</span>
+          </div>
+        </div>
+
+        <div class="task">
+          <div class="task-head">
+            <span class="checkbox"></span>
+            <span class="timer-icon">⏱</span>
+            <span class="task-title">Fix VPS deploy failing on KomalFi</span>
+          </div>
+          <div class="task-meta">
+            <span class="tag"><span class="dot"></span>development</span>
+            <span class="tag"><span class="dot"></span>allianza-biz</span>
+          </div>
+        </div>
+
+        <div class="task">
+          <div class="task-head">
+            <span class="checkbox"></span>
+            <span class="timer-icon">⏱</span>
+            <span class="task-title">Send GDPR one-pager to 5 Berlin clinics</span>
+          </div>
+          <div class="task-meta">
+            <span class="tag"><span class="dot"></span>outreach</span>
+            <span class="tag"><span class="dot"></span>allianza-biz</span>
+          </div>
+        </div>
+
+        <button class="priority-add">+ Add Urgent task</button>
+      </div>
+
+      <div class="priority-col med">
+        <div class="priority-col-head">
+          <span class="marker"></span>
+          <span class="name"><em>Medium</em></span>
+          <span class="count">05</span>
+        </div>
+
+        <div class="task">
+          <div class="task-head">
+            <span class="checkbox"></span>
+            <span class="timer-icon">⏱</span>
+            <span class="task-title">Launch email campaign for first 50 leads</span>
+          </div>
+          <div class="task-meta">
+            <span class="tag"><span class="dot"></span>outreach</span>
+          </div>
+        </div>
+
+        <div class="task">
+          <div class="task-head">
+            <span class="checkbox"></span>
+            <span class="timer-icon">⏱</span>
+            <span class="task-title">Polish CRM pipeline drag-drop perf</span>
+            <span class="task-time has-time">28m</span>
+          </div>
+          <div class="task-meta">
+            <span class="tag"><span class="dot"></span>development</span>
+          </div>
+        </div>
+
+        <div class="task">
+          <div class="task-head">
+            <span class="checkbox"></span>
+            <span class="timer-icon">⏱</span>
+            <span class="task-title">Review Instantly.ai analytics — Poland batch</span>
+          </div>
+          <div class="task-meta">
+            <span class="tag"><span class="dot"></span>outreach</span>
+          </div>
+        </div>
+
+        <button class="priority-add">+ Add Medium task</button>
+      </div>
+
+      <div class="priority-col low">
+        <div class="priority-col-head">
+          <span class="marker"></span>
+          <span class="name"><em>Low</em></span>
+          <span class="count">04</span>
+        </div>
+
+        <div class="task">
+          <div class="task-head">
+            <span class="checkbox"></span>
+            <span class="timer-icon">⏱</span>
+            <span class="task-title">Read Specter case study</span>
+          </div>
+          <div class="task-meta">
+            <span class="tag"><span class="dot"></span>admin</span>
+          </div>
+        </div>
+
+        <div class="task">
+          <div class="task-head">
+            <span class="checkbox"></span>
+            <span class="timer-icon">⏱</span>
+            <span class="task-title">Tidy unused Postgres indexes</span>
+          </div>
+          <div class="task-meta">
+            <span class="tag"><span class="dot"></span>admin</span>
+          </div>
+        </div>
+
+        <button class="priority-add">+ Add Low task</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- VIEW 3 — CREATE TASK                                            -->
+<!-- ============================================================ -->
+<div class="view-section" id="view-create">
+  <div class="app">
+
+    <header class="header">
+      <div class="brand">
+        <span class="brand-mark">G</span>
+        <span class="brand-name">Get-it-<em>done</em></span>
+      </div>
+    </header>
+
+    <div class="callout">
+      <h3>What's new on this view</h3>
+      <ul>
+        <li><strong>Change #3</strong> — No more "Done" button. Multi-select dropdowns close on tap-outside; single-select close on tap.</li>
+        <li><strong>Change #4</strong> — Opened from a filtered view, Project + Category come pre-filled with an "↪ inherited" mark.</li>
+        <li><strong>Change #2</strong> — Project picker shows only <strong>active</strong> projects by default.</li>
+      </ul>
+    </div>
+
+    <div class="modal-stage">
+      <div class="modal">
+        <h2>
+          New <em>task</em>
+          <span class="from-filter">from filtered view</span>
+          <button class="modal-close">×</button>
+        </h2>
+
+        <input type="text" class="modal-input" placeholder="What needs to get done…">
+
+        <div class="modal-row">
+          <button class="modal-select">
+            <span style="width:5px; height:5px; border-radius:50%; background:#71717a; display:inline-block;"></span>
+            Med priority
+            <span class="caret">▾</span>
+          </button>
+          <button class="modal-select inherited has-value">
+            development
+            <span class="caret">▾</span>
+          </button>
+          <button class="modal-select inherited has-value">
+            get-it-done
+            <span class="caret">▾</span>
+          </button>
+          <button class="modal-select">
+            Tags
+            <span class="caret">▾</span>
+          </button>
+        </div>
+
+        <div class="modal-row">
+          <button class="modal-select">
+            📅 Date <span style="font-family: var(--sans);  opacity:.7; margin-left:4px;">optional</span>
+            <span class="caret">▾</span>
+          </button>
+        </div>
+
+        <div class="ai-assist">
+          <span class="ai-label">AI assist</span>
+          <span class="ai-pill">Break into subtasks</span>
+          <span class="ai-pill">Estimate time</span>
+        </div>
+
+        <div class="modal-actions">
+          <span class="keybind">
+            <kbd>⌘</kbd> + <kbd>Enter</kbd> to create
+          </span>
+          <button class="modal-create">Create task</button>
+        </div>
+      </div>
+
+      <div style="margin-top:36px;">
+        <div style="text-align:center; margin-bottom:14px; font-family: var(--mono); font-size: 9px; color: var(--ink-mute); letter-spacing: .22em; text-transform: uppercase;">Project picker — active only by default</div>
+        <div class="dd-panel" style="margin: 0 auto;">
+          <input type="text" class="dd-search" placeholder="Search projects…">
+          <div class="dd-item selected">
+            <span class="mini-cb"></span>
+            <span class="dot" style="background:#0a0a0a"></span>
+            <span>allianza-biz</span>
+          </div>
+          <div class="dd-item">
+            <span class="mini-cb"></span>
+            <span class="dot" style="background:#27272a"></span>
+            <span>get-it-done</span>
+          </div>
+          <div class="dd-item">
+            <span class="mini-cb"></span>
+            <span class="dot" style="background:#3f3f46"></span>
+            <span>komalfi</span>
+          </div>
+          <div class="dd-item">
+            <span class="mini-cb"></span>
+            <span class="dot" style="background:#52525b"></span>
+            <span>theaigirlhere</span>
+          </div>
+          <div class="dd-item">
+            <span class="mini-cb"></span>
+            <span class="dot" style="background:#71717a"></span>
+            <span>zakir</span>
+          </div>
+          <div class="dd-item">
+            <span class="mini-cb"></span>
+            <span class="dot" style="background:#a1a1aa"></span>
+            <span>gre-prep</span>
+          </div>
+          <div class="dd-divider"></div>
+          <label class="dd-toggle">
+            <input type="checkbox"> Show completed <span style="margin-left:auto; font-family:var(--mono); font-size:9px; color:var(--ink-mute);">3</span>
+          </label>
+          <label class="dd-toggle">
+            <input type="checkbox"> Show archived <span style="margin-left:auto; font-family:var(--mono); font-size:9px; color:var(--ink-mute);">2</span>
+          </label>
+          <div class="dd-divider"></div>
+          <div class="dd-create">+ Create new project</div>
+          <div class="dd-hint">click outside or hit esc to close</div>
+        </div>
+
+        <div style="text-align:center; margin-top:24px; font-family: var(--mono); font-size: 9px; color: var(--ink-mute); letter-spacing: .22em; text-transform: uppercase;">Toggled on — completed projects shown</div>
+        <div class="dd-panel" style="margin: 12px auto 0;">
+          <div class="dd-item completed-item">
+            <span class="mini-cb"></span>
+            <span class="dot" style="background:var(--ink-mute)"></span>
+            <span>hi-rose</span>
+            <span class="lbl-tag">complete</span>
+          </div>
+          <div class="dd-item completed-item">
+            <span class="mini-cb"></span>
+            <span class="dot" style="background:var(--ink-mute)"></span>
+            <span>old-client-xyz</span>
+            <span class="lbl-tag">complete</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- VIEW 4 — MANAGE PROJECTS                                        -->
+<!-- ============================================================ -->
+<div class="view-section" id="view-projects">
+  <div class="app">
+
+    <header class="header">
+      <div class="brand">
+        <span class="brand-mark">G</span>
+        <span class="brand-name">Get-it-<em>done</em></span>
+      </div>
+    </header>
+
+    <div class="callout">
+      <h3>What's new on this view</h3>
+      <ul>
+        <li><strong>Change #2</strong> — Projects have a lifecycle: <strong>Active</strong>, <strong>Completed</strong>, or <strong>Archived</strong>.</li>
+        <li><strong>Completed</strong> projects keep data for analytics but disappear from the create-task picker.</li>
+        <li><strong>Delete</strong> reserved for accidents. Asks for confirmation.</li>
+      </ul>
+    </div>
+
+    <div class="title-row">
+      <h1>Manage <em>projects</em>.</h1>
+      <div class="title-meta">
+        <span class="title-date">11 TOTAL · 8 ACTIVE · 3 COMPLETED · 0 ARCHIVED</span>
+      </div>
+    </div>
+
+    <div class="mp-tabs">
+      <button class="mp-tab active">All <span class="num">11</span></button>
+      <button class="mp-tab">Active <span class="num">08</span></button>
+      <button class="mp-tab">Completed <span class="num">03</span></button>
+      <button class="mp-tab">Archived <span class="num">00</span></button>
+    </div>
+
+    <div class="pm-list">
+      <div class="pm-row">
+        <span class="pm-tag">allianza-biz</span>
+        <select class="pm-status">
+          <option>Active</option>
+          <option>Completed</option>
+          <option>Archived</option>
+        </select>
+        <span class="pm-meta">42 TASKS · 18H TRACKED</span>
+        <span class="pm-actions">
+          <a>Edit</a>
+          <a class="delete">Delete</a>
+        </span>
+      </div>
+
+      <div class="pm-row">
+        <span class="pm-tag">get-it-done</span>
+        <select class="pm-status">
+          <option>Active</option>
+          <option>Completed</option>
+          <option>Archived</option>
+        </select>
+        <span class="pm-meta">12 TASKS · 4H TRACKED</span>
+        <span class="pm-actions">
+          <a>Edit</a>
+          <a class="delete">Delete</a>
+        </span>
+      </div>
+
+      <div class="pm-row">
+        <span class="pm-tag">komalfi</span>
+        <select class="pm-status">
+          <option>Active</option>
+          <option>Completed</option>
+          <option>Archived</option>
+        </select>
+        <span class="pm-meta">28 TASKS · 11H TRACKED</span>
+        <span class="pm-actions">
+          <a>Edit</a>
+          <a class="delete">Delete</a>
+        </span>
+      </div>
+
+      <div class="pm-row">
+        <span class="pm-tag">theaigirlhere</span>
+        <select class="pm-status">
+          <option>Active</option>
+          <option>Completed</option>
+          <option>Archived</option>
+        </select>
+        <span class="pm-meta">19 TASKS · 7H TRACKED</span>
+        <span class="pm-actions">
+          <a>Edit</a>
+          <a class="delete">Delete</a>
+        </span>
+      </div>
+
+      <div class="pm-row completed">
+        <span class="pm-tag">hi-rose</span>
+        <select class="pm-status">
+          <option>Completed</option>
+          <option>Reactivate</option>
+          <option>Archive</option>
+        </select>
+        <span class="hidden-hint">hidden from create-task picker</span>
+        <span class="pm-actions">
+          <a>Edit</a>
+          <a class="delete">Delete</a>
+        </span>
+      </div>
+
+      <div class="pm-row completed">
+        <span class="pm-tag">old-client-xyz</span>
+        <select class="pm-status">
+          <option>Completed</option>
+          <option>Reactivate</option>
+          <option>Archive</option>
+        </select>
+        <span class="hidden-hint">hidden from create-task picker</span>
+        <span class="pm-actions">
+          <a>Edit</a>
+          <a class="delete">Delete</a>
+        </span>
+      </div>
+    </div>
+
+    <div class="add-new-form">
+      <div class="add-new-label">Add new project</div>
+      <div class="add-new-row">
+        <input type="text" placeholder="Project name…">
+        <div class="color-pickers">
+          <span style="background:#0a0a0a" class="selected"></span>
+          <span style="background:#27272a"></span>
+          <span style="background:#52525b"></span>
+          <span style="background:#71717a"></span>
+          <span style="background:#a1a1aa"></span>
+          <span style="background:var(--accent)"></span>
+        </div>
+        <button class="modal-create">Add</button>
+      </div>
+    </div>
+
+    <div class="status-guide">
+      <div class="sg-title">Status guide</div>
+      <div class="status-guide-grid">
+        <div><strong>Active</strong> — visible everywhere; default for new tasks.</div>
+        <div><strong>Completed</strong> — kept in analytics, hidden from create-task picker.</div>
+        <div><strong>Archived</strong> — hidden everywhere except this screen, but data preserved.</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- VIEW 5 — CALENDAR (NEW: goal vs work)                          -->
+<!-- ============================================================ -->
+<div class="view-section" id="view-calendar">
+  <div class="app">
+
+    <header class="header">
+      <div class="brand">
+        <span class="brand-mark">G</span>
+        <span class="brand-name">Get-it-<em>done</em></span>
+      </div>
+      <div class="header-pills">
+        <button class="pill bell">🔔</button>
+        <button class="pill" onclick="switchView('board')">← Back to board</button>
+        <button class="pill dark" onclick="switchView('insights')">Insights</button>
+      </div>
+    </header>
+
+    <div class="title-row">
+      <h1>Calendar — <em>goal vs work</em>.</h1>
+      <div class="title-meta">
+        <span class="title-date">DAILY GOAL: 8H · MONTHLY: 240H</span>
+      </div>
+    </div>
+
+    <div class="callout">
+      <h3>What's new on this view</h3>
+      <ul>
+        <li><strong>New view</strong> — Calendar with bubble sizing reflecting <strong>tracked time vs your daily goal</strong>. Big solid bubble = met or exceeded goal; thin outline = under-goal; dashed = nothing tracked.</li>
+        <li>Hover or tap any day to see exact hours, tasks completed, and goal delta.</li>
+        <li>Weekly totals at the bottom show your pacing toward the monthly goal.</li>
+      </ul>
+    </div>
+
+    <div class="view-row">
+      <div class="view-tabs">
+        <button class="view-tab" onclick="switchView('board')">Board</button>
+        <button class="view-tab" onclick="switchView('list')">List</button>
+        <button class="view-tab">Schedule</button>
+        <button class="view-tab active new">Calendar</button>
+        <button class="view-tab" onclick="switchView('priority')">Priority</button>
+      </div>
+    </div>
+
+    <div class="goal-config">
+      <div class="goal-config-head">
+        <span class="gc-title">Per-day target</span>
+        <span class="gc-week-total" id="gc-week-total">100<em>h / week</em></span>
+        <div class="gc-presets">
+          <button class="gc-preset" data-preset="weekend-off">Weekdays only</button>
+          <button class="gc-preset active" data-preset="balanced">Balanced</button>
+          <button class="gc-preset" data-preset="hustle">Hustle 7 days</button>
+          <button class="gc-preset" data-preset="custom">Custom</button>
+        </div>
+      </div>
+
+      <div class="day-targets" id="day-targets">
+        <div class="day-target">
+          <span class="dt-day">Mon</span>
+          <span class="dt-input-wrap">
+            <input type="number" class="dt-input" data-day="1" value="16" min="0" max="24">
+            <span class="dt-unit">h</span>
+          </span>
+        </div>
+        <div class="day-target">
+          <span class="dt-day">Tue</span>
+          <span class="dt-input-wrap">
+            <input type="number" class="dt-input" data-day="2" value="16" min="0" max="24">
+            <span class="dt-unit">h</span>
+          </span>
+        </div>
+        <div class="day-target">
+          <span class="dt-day">Wed</span>
+          <span class="dt-input-wrap">
+            <input type="number" class="dt-input" data-day="3" value="18" min="0" max="24">
+            <span class="dt-unit">h</span>
+          </span>
+        </div>
+        <div class="day-target">
+          <span class="dt-day">Thu</span>
+          <span class="dt-input-wrap">
+            <input type="number" class="dt-input" data-day="4" value="16" min="0" max="24">
+            <span class="dt-unit">h</span>
+          </span>
+        </div>
+        <div class="day-target">
+          <span class="dt-day">Fri</span>
+          <span class="dt-input-wrap">
+            <input type="number" class="dt-input" data-day="5" value="14" min="0" max="24">
+            <span class="dt-unit">h</span>
+          </span>
+        </div>
+        <div class="day-target">
+          <span class="dt-day">Sat</span>
+          <span class="dt-input-wrap">
+            <input type="number" class="dt-input" data-day="6" value="12" min="0" max="24">
+            <span class="dt-unit">h</span>
+          </span>
+        </div>
+        <div class="day-target zero">
+          <span class="dt-day">Sun</span>
+          <span class="dt-input-wrap">
+            <input type="number" class="dt-input" data-day="0" value="8" min="0" max="24">
+            <span class="dt-unit">h</span>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="calendar-card">
+      <div class="cal-head">
+        <h3>April <em>2026</em></h3>
+        <span class="sub">Per-day targets · 22 days tracked · 8 hit goal</span>
+        <div class="nav-arrows">
+          <button class="cal-arrow">‹</button>
+          <button class="cal-arrow">›</button>
+        </div>
+      </div>
+
+      <div class="cal-totals">
+        <div class="cal-total tracked">
+          <span class="lbl">Tracked this month</span>
+          <span class="v">147h 12m</span>
+        </div>
+        <div class="cal-total goal">
+          <span class="lbl">Month goal</span>
+          <span class="v">420<em>h</em></span>
+        </div>
+        <div class="cal-total deficit">
+          <span class="lbl">Pace</span>
+          <span class="v">35<em>% of goal</em></span>
+        </div>
+        <div class="cal-total projected">
+          <span class="lbl">Projected month-end</span>
+          <span class="v">192<em>h · 46% of target</em></span>
+        </div>
+      </div>
+
+      <div class="cal-grid">
+        <div class="cal-day-name">Sun</div>
+        <div class="cal-day-name">Mon</div>
+        <div class="cal-day-name">Tue</div>
+        <div class="cal-day-name">Wed</div>
+        <div class="cal-day-name">Thu</div>
+        <div class="cal-day-name">Fri</div>
+        <div class="cal-day-name">Sat</div>
+      </div>
+
+      <div class="cal-grid" id="cal-grid"><!-- generated --></div>
+
+      <div class="cal-legend">
+        <div class="lg-item">
+          <svg viewBox="0 0 24 24"><circle class="t" cx="12" cy="12" r="9"/></svg>
+          no work · just date
+        </div>
+        <div class="lg-item">
+          <svg viewBox="0 0 24 24">
+            <circle class="t" cx="12" cy="12" r="9"/>
+            <circle class="f-half" cx="12" cy="12" r="9" stroke-dasharray="56.55" stroke-dashoffset="42" transform="rotate(-90 12 12)"/>
+          </svg>
+          partial · under target
+        </div>
+        <div class="lg-item">
+          <svg viewBox="0 0 24 24">
+            <circle class="t" cx="12" cy="12" r="9"/>
+            <circle class="f-full" cx="12" cy="12" r="9" stroke-dasharray="56.55" stroke-dashoffset="0" transform="rotate(-90 12 12)"/>
+          </svg>
+          target hit
+        </div>
+        <div class="lg-item">
+          <svg viewBox="0 0 24 24">
+            <circle class="f-over" cx="12" cy="12" r="9"/>
+          </svg>
+          exceeded
+        </div>
+        <span class="lg-foot">ring fill = % of that day's target completed</span>
+      </div>
+
+      <div class="cal-week-totals">
+        <div class="week">
+          <div class="wlbl">WK 14 · MAR 29 — APR 4</div>
+          <div class="wv">42<em>h / 100h</em></div>
+          <div class="wbar"><div class="wfill" style="width:42%"></div></div>
+        </div>
+        <div class="week">
+          <div class="wlbl">WK 15 · APR 5 — 11</div>
+          <div class="wv">51<em>h / 100h</em></div>
+          <div class="wbar"><div class="wfill" style="width:51%"></div></div>
+        </div>
+        <div class="week">
+          <div class="wlbl">WK 16 · APR 12 — 18</div>
+          <div class="wv">38<em>h / 100h</em></div>
+          <div class="wbar"><div class="wfill" style="width:38%"></div></div>
+        </div>
+        <div class="week">
+          <div class="wlbl">WK 17 · APR 19 — 25</div>
+          <div class="wv">16<em>h 12m / 100h · in progress</em></div>
+          <div class="wbar"><div class="wfill" style="width:16%"></div></div>
+        </div>
+        <div class="week">
+          <div class="wlbl">WK 18 · APR 26 — 30</div>
+          <div class="wv" style="color:rgba(255,255,255,.4); font-weight: 400;">upcoming</div>
+          <div class="wbar"><div class="wfill" style="width:0%"></div></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- VIEW 6 — INSIGHTS                                              -->
+<!-- ============================================================ -->
+<div class="view-section" id="view-insights">
+  <div class="app">
+
+    <header class="header">
+      <div class="brand">
+        <span class="brand-mark">G</span>
+        <span class="brand-name">Get-it-<em>done</em></span>
+      </div>
+      <div class="header-pills">
+        <button class="pill" onclick="switchView('board')">← Back to board</button>
+        <button class="pill" onclick="switchView('calendar')">Calendar</button>
+      </div>
+    </header>
+
+    <div class="title-row">
+      <h1>Insights — <em>daily progress</em>.</h1>
+      <div class="title-meta">
+        <span class="title-date">LAST 90 DAYS · UPDATED LIVE</span>
+      </div>
+    </div>
+
+    <div class="callout">
+      <h3>What's new on this view</h3>
+      <ul>
+        <li><strong>Change #6</strong> — New <strong>Daily progress</strong> tab. Streak ring, day heatmap, per-day completion list.</li>
+        <li><strong>New</strong> — A <strong>"When you work"</strong> hour-of-day heatmap showing which hours of which days you're most productive. Spot your peak focus windows.</li>
+        <li>Tap any day on the heatmap to see exactly which tasks you finished.</li>
+      </ul>
+    </div>
+
+    <div class="insights-tabs">
+      <button class="insights-tab">Where your time went</button>
+      <button class="insights-tab active new">Daily progress</button>
+      <button class="insights-tab new">When you work</button>
+      <button class="insights-tab">Category × Project matrix</button>
+    </div>
+
+    <div class="stat-grid">
+      <div class="stat dark streak">
+        <div class="lbl">Current streak</div>
+        <div class="val">🔥<em>3</em><span class="sm">days</span></div>
+        <div class="sub">Best yet: 11 days · Apr 7</div>
+      </div>
+      <div class="stat">
+        <div class="lbl">Today</div>
+        <div class="val">1<span class="sm">/ 5</span></div>
+        <div class="sub">4 left · 7h 20m to wrap</div>
+      </div>
+      <div class="stat">
+        <div class="lbl">This week</div>
+        <div class="val">18<span class="sm">/ 30</span></div>
+        <div class="sub">60% — up 6 from last week</div>
+      </div>
+      <div class="stat">
+        <div class="lbl">30-day average</div>
+        <div class="val">3.2<span class="sm">/ 5</span></div>
+        <div class="sub">64% completion rate</div>
+      </div>
+    </div>
+
+    <!-- TODAY'S PROGRESS — slim card with completed task list -->
+    <div class="insight-card">
+      <div class="insight-card-head">
+        <h3>Today <em>so far</em>.</h3>
+        <span class="sub">Friday, Apr 24 · 4h 16m tracked · 4 / 5 completed</span>
+        <div class="right">
+          <button>Today</button>
+          <button class="active">Yesterday</button>
+          <button>Pick a day</button>
+        </div>
+      </div>
+      <ul class="completed-list">
+        <li>
+          <span class="checkmark">✓</span>
+          <span class="task-name">Scrape 50 high-intent leads from Apollo.io</span>
+          <span class="tag"><span class="dot"></span>outreach</span>
+          <span class="time">1h 32m</span>
+        </li>
+        <li>
+          <span class="checkmark">✓</span>
+          <span class="task-name">Draft personalized cold emails — Batch 1</span>
+          <span class="tag"><span class="dot"></span>outreach</span>
+          <span class="time">54m</span>
+        </li>
+        <li>
+          <span class="checkmark">✓</span>
+          <span class="task-name">Setup email campaign for medical clients</span>
+          <span class="tag"><span class="dot"></span>outreach</span>
+          <span class="time">51m</span>
+        </li>
+        <li>
+          <span class="checkmark">✓</span>
+          <span class="task-name">KomalFi BNPL tracker — bug fix</span>
+          <span class="tag"><span class="dot"></span>development</span>
+          <span class="time">59m</span>
+        </li>
+        <li class="is-missed">
+          <span class="missed"></span>
+          <span class="task-name">Record YouTube video on Claude Code skills</span>
+          <span class="tag"><span class="dot"></span>content</span>
+          <span class="time">missed</span>
+        </li>
+      </ul>
+    </div>
+
+    <!-- HOUR HEATMAP -->
+    <div class="insight-card">
+      <div class="insight-card-head">
+        <h3>When <em>you work</em>.</h3>
+        <span class="sub">Hours of day × days of week — last 30 days. Spot your peak focus windows.</span>
+        <div class="right">
+          <button>7d</button>
+          <button class="active">30d</button>
+          <button>90d</button>
+        </div>
+      </div>
+
+      <div class="hour-heatmap" id="hour-heatmap">
+        <!-- generated by JS -->
+      </div>
+
+      <div class="hour-summary">
+        <div class="item">
+          <div class="lbl">Peak hour</div>
+          <div class="v">10<em>am — 11</em>am</div>
+        </div>
+        <div class="item">
+          <div class="lbl">2nd peak</div>
+          <div class="v">9<em>pm — 10</em>pm</div>
+        </div>
+        <div class="item">
+          <div class="lbl">Most focused day</div>
+          <div class="v">Wednesday</div>
+        </div>
+        <div class="item">
+          <div class="lbl">Late-night ratio</div>
+          <div class="v">22<em>%</em><span style="font-family: var(--sans);  font-size:13px; color:var(--ink-mute);"> after 10pm</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STREAK CHART -->
+    <div class="insight-card">
+      <div class="insight-card-head">
+        <h3>Streak <em>history</em>.</h3>
+        <span class="sub">Consistency over the last 12 weeks</span>
+      </div>
+      <svg viewBox="0 0 800 200" preserveAspectRatio="none" style="width:100%; height:200px;">
+        <defs>
+          <linearGradient id="grad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#0a0a0a" stop-opacity=".3"/>
+            <stop offset="100%" stop-color="#0a0a0a" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+
+        <line x1="40" y1="50" x2="800" y2="50" stroke="rgba(0,0,0,.06)" stroke-width="1"/>
+        <line x1="40" y1="110" x2="800" y2="110" stroke="rgba(0,0,0,.06)" stroke-width="1"/>
+        <line x1="40" y1="170" x2="800" y2="170" stroke="rgba(0,0,0,.06)" stroke-width="1"/>
+
+        <text x="0" y="46" font-family="JetBrains Mono" font-size="9" fill="#71717a">11 ───</text>
+        <text x="0" y="106" font-family="JetBrains Mono" font-size="9" fill="#71717a">07 ───</text>
+        <text x="0" y="166" font-family="JetBrains Mono" font-size="9" fill="#71717a">03 ───</text>
+
+        <path d="M 40,170 L 100,150 L 160,120 L 220,60 L 280,80 L 340,130 L 400,100 L 460,75 L 520,40 L 580,105 L 640,140 L 720,135 L 760,135 L 760,200 L 40,200 Z" fill="url(#grad)"/>
+        <path d="M 40,170 L 100,150 L 160,120 L 220,60 L 280,80 L 340,130 L 400,100 L 460,75 L 520,40 L 580,105 L 640,140 L 720,135 L 760,135" fill="none" stroke="#0a0a0a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+        <circle cx="520" cy="40" r="4" fill="#fff" stroke="#0a0a0a" stroke-width="2"/>
+        <text x="520" y="28" text-anchor="middle" font-family="Inter" font-size="13" font-weight="600" fill="#0a0a0a">peak · 11 days</text>
+
+        <circle cx="760" cy="135" r="5" fill="#0a0a0a"/>
+        <circle cx="760" cy="135" r="11" fill="none" stroke="#0a0a0a" stroke-opacity=".25" stroke-width="2"/>
+        <text x="760" y="160" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#71717a" letter-spacing=".1em">TODAY</text>
+      </svg>
+    </div>
+
+  </div>
+</div>
+
+
+<!-- ============== QUICK-ADD COMMAND BAR ============== -->
+<div class="qa-backdrop" id="qa-backdrop" onclick="if(event.target===this)closeQuickAdd()">
+  <div class="qa-card" id="qa-card">
+    <div class="qa-card-head">
+      <div class="qa-prefix">
+        <kbd>Ctrl</kbd> + <kbd>K</kbd>
+        Quick add task
+      </div>
+      <div class="qa-status">
+        <span class="esc">ESC</span> to close
+      </div>
+    </div>
+
+    <div class="qa-filter-banner" id="qa-filter-banner" style="display:none;">
+      <span class="qa-fb-mark">FROM ACTIVE FILTERS</span>
+      <span>Pre-filling <strong id="qa-fb-text">project=get-it-done · category=development</strong></span>
+    </div>
+
+    <div class="qa-input-wrap">
+      <input type="text" class="qa-input" id="qa-input" placeholder="Type a task… use @project #category !!! ~30m -> subtasks" autocomplete="off">
+    </div>
+
+    <div class="qa-detected" id="qa-detected">
+      <span class="qa-empty">Detected modifiers will appear here as you type…</span>
+    </div>
+
+    <div class="qa-title-preview">
+      <span class="lbl">Title</span>
+      <span class="title empty" id="qa-title">empty</span>
+    </div>
+
+    <div class="qa-subtasks-preview" id="qa-subtasks-preview" style="display:none;">
+      <div class="lbl">Subtasks</div>
+      <ul id="qa-subtasks-list"></ul>
+    </div>
+
+    <div class="qa-help">
+      <div class="qa-help-row"><code>@name</code> project</div>
+      <div class="qa-help-row"><code>#name</code> category</div>
+      <div class="qa-help-row"><code>!!! / !! / !</code> urgent / med / low</div>
+      <div class="qa-help-row"><code>~2h / ~30m</code> time estimate</div>
+      <div class="qa-help-row"><code>tomorrow, mon, apr 30</code> due date</div>
+      <div class="qa-help-row"><code>-&gt; a; b; c</code> subtasks</div>
+    </div>
+
+    <div class="qa-footer">
+      <span class="submit-hint primary"><kbd>Enter</kbd> Create</span>
+      <span class="submit-hint"><kbd>Shift</kbd>+<kbd>Enter</kbd> Create + start timer</span>
+      <span class="qa-success" id="qa-success"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+  function switchView(view) {
+    document.querySelectorAll('.view-section').forEach(v => v.classList.remove('active'));
+    document.querySelectorAll('.proto-tab').forEach(t => t.classList.remove('active'));
+    document.getElementById('view-' + view).classList.add('active');
+    document.querySelector('.proto-tab[data-view="' + view + '"]').classList.add('active');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  document.querySelectorAll('.proto-tab').forEach(t => {
+    t.addEventListener('click', () => switchView(t.dataset.view));
+  });
+
+  // (Daily heatmap removed — see "When you work" hour heatmap below)
+
+
+  // ============== Hour heatmap ==============
+  (function buildHourHeatmap() {
+    const root = document.getElementById('hour-heatmap');
+    if (!root) return;
+
+    // Header row: empty + 24 hour labels
+    const empty = document.createElement('div');
+    root.appendChild(empty);
+    const hourLabelsToShow = [0, 4, 8, 12, 16, 20];
+    for (let h = 0; h < 24; h++) {
+      const lbl = document.createElement('div');
+      lbl.className = 'hour-label';
+      if (hourLabelsToShow.includes(h)) {
+        const display = h === 0 ? '12a' : h === 12 ? '12p' : h < 12 ? h + 'a' : (h - 12) + 'p';
+        lbl.textContent = display;
+      }
+      root.appendChild(lbl);
+    }
+
+    // Days
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    // Komal's pattern: heavy late mornings, productive late evenings, light midnight crunch
+    const dayPatterns = [
+      // each row: 24 hours, 0=none, 1=light, 2=med, 3=high, 4=peak
+      [1,0,0,0,0,0,0,0,2,3,4,4,3,2,3,2,2,1,2,3,3,2,1,0], // Mon
+      [0,0,0,0,0,0,0,1,2,3,4,4,3,2,2,3,2,2,2,3,2,1,1,0], // Tue
+      [1,1,0,0,0,0,0,1,3,4,4,4,3,3,3,3,2,2,3,4,4,3,2,1], // Wed (most focused)
+      [0,0,0,0,0,0,0,1,2,3,3,4,3,2,2,2,2,2,2,3,3,2,1,0], // Thu
+      [1,0,0,0,0,0,0,1,2,3,4,3,2,2,2,2,1,2,2,3,2,2,1,1], // Fri
+      [0,0,0,0,0,0,0,0,1,2,2,3,2,2,3,3,2,2,3,3,2,1,0,0], // Sat
+      [0,0,0,0,0,0,0,0,1,1,2,2,1,1,2,2,2,1,2,2,1,1,0,0]  // Sun
+    ];
+
+    for (let d = 0; d < 7; d++) {
+      const dayLbl = document.createElement('div');
+      dayLbl.className = 'hm-row-label';
+      dayLbl.textContent = days[d];
+      root.appendChild(dayLbl);
+      for (let h = 0; h < 24; h++) {
+        const lv = dayPatterns[d][h];
+        const cell = document.createElement('div');
+        const cls = ['hour-cell'];
+        if (lv) cls.push('l' + lv);
+        cell.className = cls.join(' ');
+        const hourLbl = h === 0 ? '12am' : h === 12 ? '12pm' : h < 12 ? h + 'am' : (h - 12) + 'pm';
+        cell.title = `${days[d]} ${hourLbl} · ${['none','15m','45m','1h+','peak'][lv]}`;
+        root.appendChild(cell);
+      }
+    }
+  })();
+
+  // ============== Calendar (April 2026) — per-day targets + ring rendering ==============
+  (function buildCalendar() {
+    const grid = document.getElementById('cal-grid');
+    if (!grid) return;
+
+    // April 2026 — April 1 is Wednesday
+    const firstDayOfWeek = 3; // Wed
+    const daysInMonth = 30;
+    const today = 25;
+
+    // Hours tracked per April-day (1..30). Days NOT here = no work logged.
+    const tracked = {
+      1: 6.5, 2: 8.2, 3: 9.5,
+      6: 7.5, 7: 16.0, 8: 13.2, 9: 11.8, 10: 6.5,
+      13: 5.5, 14: 14.0, 15: 12.2, 16: 19.0, 17: 4.0, 18: 2.5,
+      19: 2.3, 20: 11.7, 21: 0.7, 22: 13.5, 24: 8.3, 25: 1.4
+    };
+
+    // Per-day target (Sun=0, Mon=1, ... Sat=6) — read from inputs
+    function readTargets() {
+      const targets = {};
+      document.querySelectorAll('.dt-input').forEach(input => {
+        targets[parseInt(input.dataset.day, 10)] = Math.max(0, parseFloat(input.value) || 0);
+      });
+      return targets;
+    }
+
+    function dayOfWeekFor(day) {
+      // April 1, 2026 is Wednesday (3). day=1 -> 3, day=2 -> 4, etc.
+      // 0=Sun, 1=Mon, ..., 6=Sat
+      return (firstDayOfWeek + (day - 1)) % 7;
+    }
+
+    function updateZeroState() {
+      document.querySelectorAll('.day-target').forEach(el => {
+        const input = el.querySelector('.dt-input');
+        if (input && parseFloat(input.value) <= 0) el.classList.add('zero');
+        else el.classList.remove('zero');
+      });
+    }
+
+    function updateWeekTotal() {
+      const targets = readTargets();
+      const total = Object.values(targets).reduce((a, b) => a + b, 0);
+      const el = document.getElementById('gc-week-total');
+      if (el) el.innerHTML = `${total}<em>h / week</em>`;
+    }
+
+    function render() {
+      grid.innerHTML = '';
+      const targets = readTargets();
+
+      // empty cells before April 1
+      for (let i = 0; i < firstDayOfWeek; i++) {
+        const e = document.createElement('div');
+        e.className = 'cal-cell empty';
+        grid.appendChild(e);
+      }
+
+      for (let d = 1; d <= daysInMonth; d++) {
+        const cell = document.createElement('div');
+        cell.className = 'cal-cell';
+        if (d === today) cell.classList.add('is-today');
+
+        const hours = tracked[d];
+        const dow = dayOfWeekFor(d);
+        const target = targets[dow] || 0;
+
+        if (hours === undefined) {
+          // No work tracked — just show the date. If target is 0 (rest day), show subtler.
+          cell.classList.add('no-data');
+          if (target === 0) cell.classList.add('rest-day');
+          cell.innerHTML = `<span class="cal-num">${d}</span>`;
+        } else if (target === 0) {
+          // Worked on a rest day — count this as bonus, render as over with a tiny full ring
+          cell.classList.add('over', 'rest-bonus');
+          const r = 44, c = 2 * Math.PI * r;
+          cell.innerHTML = `
+            <svg class="cal-ring" viewBox="0 0 100 100">
+              <circle class="ring-track" cx="50" cy="50" r="${r}" stroke-width="3"/>
+              <circle class="ring-fill" cx="50" cy="50" r="${r}" stroke-width="5"
+                stroke-dasharray="${c}" stroke-dashoffset="0"/>
+            </svg>
+            <span class="cal-num">${d}</span>
+          `;
+          const h = Math.floor(hours), m = Math.round((hours - h) * 60);
+          const txt = h > 0 ? (m > 0 ? `${h}h ${m}m` : `${h}h`) : `${m}m`;
+          const hoursEl = document.createElement('span');
+          hoursEl.className = 'cal-hours';
+          hoursEl.textContent = txt + ' · bonus';
+          cell.appendChild(hoursEl);
+          cell.title = `Apr ${d} (rest day) — ${hours.toFixed(1)}h tracked · bonus`;
+        } else {
+          const ratio = hours / target;
+          if (hours === 0) cell.classList.add('zero');
+          else if (ratio >= 1) cell.classList.add('over');
+          else cell.classList.add('partial');
+
+          const r = 44, c = 2 * Math.PI * r;
+          const visualRatio = Math.min(1, ratio);
+          const dashOffset = c * (1 - visualRatio);
+
+          cell.innerHTML = `
+            <svg class="cal-ring" viewBox="0 0 100 100">
+              <circle class="ring-track" cx="50" cy="50" r="${r}" stroke-width="3"/>
+              <circle class="ring-fill" cx="50" cy="50" r="${r}" stroke-width="3"
+                stroke-dasharray="${c}" stroke-dashoffset="${dashOffset}"/>
+            </svg>
+            <span class="cal-num">${d}</span>
+          `;
+
+          if (hours > 0) {
+            const h = Math.floor(hours), m = Math.round((hours - h) * 60);
+            const txt = h > 0 ? (m > 0 ? `${h}h ${m}m` : `${h}h`) : `${m}m`;
+            const hoursEl = document.createElement('span');
+            hoursEl.className = 'cal-hours';
+            hoursEl.textContent = txt;
+            cell.appendChild(hoursEl);
+          }
+
+          const pct = Math.round(ratio * 100);
+          cell.title = `Apr ${d} — ${hours.toFixed(1)}h / ${target}h target (${pct}%)`;
+        }
+
+        grid.appendChild(cell);
+      }
+    }
+
+    // Wire up day-target inputs
+    document.querySelectorAll('.dt-input').forEach(input => {
+      input.addEventListener('input', () => {
+        updateZeroState();
+        updateWeekTotal();
+        render();
+        // switch preset to "custom" when user hand-edits
+        document.querySelectorAll('.gc-preset').forEach(b => b.classList.remove('active'));
+        const customBtn = document.querySelector('.gc-preset[data-preset="custom"]');
+        if (customBtn) customBtn.classList.add('active');
+      });
+    });
+
+    // Wire up presets
+    const presets = {
+      'weekend-off': { 0: 0, 1: 16, 2: 16, 3: 16, 4: 16, 5: 16, 6: 0 }, // 80h
+      'balanced':    { 0: 8, 1: 16, 2: 16, 3: 18, 4: 16, 5: 14, 6: 12 }, // 100h
+      'hustle':      { 0: 14, 1: 14, 2: 14, 3: 14, 4: 14, 5: 14, 6: 14 } // 98h
+    };
+    document.querySelectorAll('.gc-preset').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const key = btn.dataset.preset;
+        if (key === 'custom') return;
+        const config = presets[key];
+        if (!config) return;
+        document.querySelectorAll('.dt-input').forEach(input => {
+          const dow = parseInt(input.dataset.day, 10);
+          input.value = config[dow];
+        });
+        document.querySelectorAll('.gc-preset').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        updateZeroState();
+        updateWeekTotal();
+        render();
+      });
+    });
+
+    updateZeroState();
+    updateWeekTotal();
+    render();
+  })();
+
+
+  // ============== QUICK-ADD COMMAND BAR ==============
+  // Parser supports explicit triggers only:
+  //   @project   #category   !!! / !! / !   ~30m / ~2h
+  //   tomorrow / today / mon-sun / apr 30
+  //   -> subtask 1; subtask 2
+
+  const QA_PROJECTS = ['allianza-biz','get-it-done','komalfi','theaigirlhere','zakir','gre-prep','perfume-brand','bags-line','candles-business','hyros','komal.yt','aim-funnels'];
+  const QA_CATEGORIES = ['development','content','outreach','admin','learning','personal'];
+  const QA_DAYS = ['mon','tue','wed','thu','fri','sat','sun','monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+  const QA_MONTHS = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+
+  // Simulated: filters that are active on the current view (would come from app state)
+  // These would be passed in from the active board/list view filter state in the real app.
+  const QA_ACTIVE_FILTERS = {
+    project: 'get-it-done',
+    category: 'development'
+  };
+
+  function openQuickAdd() {
+    const bd = document.getElementById('qa-backdrop');
+    const input = document.getElementById('qa-input');
+    bd.classList.add('show');
+
+    // Show inheritance banner if filters active
+    const banner = document.getElementById('qa-filter-banner');
+    if (QA_ACTIVE_FILTERS && (QA_ACTIVE_FILTERS.project || QA_ACTIVE_FILTERS.category)) {
+      const parts = [];
+      if (QA_ACTIVE_FILTERS.project) parts.push(`project=${QA_ACTIVE_FILTERS.project}`);
+      if (QA_ACTIVE_FILTERS.category) parts.push(`category=${QA_ACTIVE_FILTERS.category}`);
+      document.getElementById('qa-fb-text').textContent = parts.join(' · ');
+      banner.style.display = 'flex';
+    } else {
+      banner.style.display = 'none';
+    }
+
+    setTimeout(() => input.focus(), 50);
+    parseAndRender(input.value);
+  }
+
+  function closeQuickAdd() {
+    document.getElementById('qa-backdrop').classList.remove('show');
+    document.getElementById('qa-input').value = '';
+    document.getElementById('qa-success').classList.remove('show');
+    parseAndRender('');
+  }
+
+  function parseQuickAdd(raw) {
+    const result = {
+      title: '',
+      project: null,
+      category: null,
+      priority: null,
+      estimate: null,
+      due: null,
+      subtasks: [],
+      inherited: { project: false, category: false }
+    };
+
+    let text = raw;
+
+    // Subtasks: -> a; b; c (everything after ->)
+    const subIdx = text.indexOf('->');
+    if (subIdx >= 0) {
+      const subStr = text.substring(subIdx + 2).trim();
+      result.subtasks = subStr.split(';').map(s => s.trim()).filter(Boolean);
+      text = text.substring(0, subIdx).trim();
+    }
+
+    // Project: @name
+    const projMatch = text.match(/@([\w.-]+)/);
+    if (projMatch) {
+      const candidate = projMatch[1].toLowerCase();
+      // fuzzy match
+      const found = QA_PROJECTS.find(p => p.toLowerCase().startsWith(candidate)) || candidate;
+      result.project = found;
+      text = text.replace(projMatch[0], '').trim();
+    }
+
+    // Category: #name
+    const catMatch = text.match(/#([\w-]+)/);
+    if (catMatch) {
+      const candidate = catMatch[1].toLowerCase();
+      const found = QA_CATEGORIES.find(c => c.startsWith(candidate)) || candidate;
+      result.category = found;
+      text = text.replace(catMatch[0], '').trim();
+    }
+
+    // Priority: !!! / !! / !
+    const prioMatch = text.match(/(?:^|\s)(!!!|!!|!)(?:\s|$)/);
+    if (prioMatch) {
+      const map = { '!!!': 'urgent', '!!': 'med', '!': 'low' };
+      result.priority = map[prioMatch[1]];
+      text = text.replace(prioMatch[0], ' ').trim();
+    }
+
+    // Time estimate: ~30m, ~2h, ~1.5h
+    const estMatch = text.match(/~(\d+(?:\.\d+)?)(h|m)/i);
+    if (estMatch) {
+      const num = parseFloat(estMatch[1]);
+      const unit = estMatch[2].toLowerCase();
+      result.estimate = unit === 'h' ? `${num}h` : `${num}m`;
+      text = text.replace(estMatch[0], '').trim();
+    }
+
+    // Due date: tomorrow / today / mon-sun / apr 30 / in 3 days
+    const today = new Date('2026-04-25'); // mock today (Saturday)
+    const lower = text.toLowerCase();
+
+    // "today"
+    if (/\btoday\b/.test(lower)) {
+      result.due = 'Today · Apr 25';
+      text = text.replace(/\btoday\b/i, '').trim();
+    }
+    // "tomorrow"
+    else if (/\btomorrow\b/.test(lower)) {
+      result.due = 'Tomorrow · Apr 26';
+      text = text.replace(/\btomorrow\b/i, '').trim();
+    }
+    // "in N days"
+    else {
+      const inMatch = text.match(/\bin (\d+) days?\b/i);
+      if (inMatch) {
+        const n = parseInt(inMatch[1], 10);
+        const date = new Date(today);
+        date.setDate(date.getDate() + n);
+        const monthAbbr = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][date.getMonth()];
+        result.due = `${monthAbbr} ${date.getDate()} · in ${n}d`;
+        text = text.replace(inMatch[0], '').trim();
+      } else {
+        // Day of week
+        const dayMatch = text.match(/\b(mon|tue|wed|thu|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i);
+        if (dayMatch) {
+          const dayName = dayMatch[1].toLowerCase();
+          const dayMap = { mon:1, tue:2, wed:3, thu:4, fri:5, sat:6, sun:0,
+                           monday:1, tuesday:2, wednesday:3, thursday:4, friday:5, saturday:6, sunday:0 };
+          const target = dayMap[dayName];
+          const todayDow = today.getDay();
+          let diff = (target - todayDow + 7) % 7;
+          if (diff === 0) diff = 7;
+          const date = new Date(today);
+          date.setDate(date.getDate() + diff);
+          const fullName = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][date.getDay()];
+          result.due = `${fullName} · ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][date.getMonth()]} ${date.getDate()}`;
+          text = text.replace(dayMatch[0], '').trim();
+        } else {
+          // "apr 30" / "may 1"
+          const monthMatch = text.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+(\d{1,2})\b/i);
+          if (monthMatch) {
+            const monthAbbr = monthMatch[1].charAt(0).toUpperCase() + monthMatch[1].slice(1).toLowerCase();
+            result.due = `${monthAbbr} ${monthMatch[2]}`;
+            text = text.replace(monthMatch[0], '').trim();
+          }
+        }
+      }
+    }
+
+    // Inheritance: if no project/category were specified, fall back to active filters
+    if (!result.project && QA_ACTIVE_FILTERS && QA_ACTIVE_FILTERS.project) {
+      result.project = QA_ACTIVE_FILTERS.project;
+      result.inherited.project = true;
+    }
+    if (!result.category && QA_ACTIVE_FILTERS && QA_ACTIVE_FILTERS.category) {
+      result.category = QA_ACTIVE_FILTERS.category;
+      result.inherited.category = true;
+    }
+
+    // Whatever's left = title (collapse extra spaces)
+    result.title = text.replace(/\s+/g, ' ').trim();
+
+    return result;
+  }
+
+  function parseAndRender(raw) {
+    const parsed = parseQuickAdd(raw);
+    const detected = document.getElementById('qa-detected');
+    const titleEl = document.getElementById('qa-title');
+    const subtasksWrap = document.getElementById('qa-subtasks-preview');
+    const subtasksList = document.getElementById('qa-subtasks-list');
+
+    // Build chips
+    const chips = [];
+
+    if (parsed.priority) {
+      const cls = parsed.priority === 'urgent' ? 'priority-urgent' : '';
+      chips.push(`<span class="qa-chip ${cls}"><span class="qa-chip-key">priority</span> ${parsed.priority}</span>`);
+    }
+    if (parsed.due) {
+      chips.push(`<span class="qa-chip"><span class="qa-chip-key">due</span> ${parsed.due}</span>`);
+    }
+    if (parsed.project) {
+      const inheritedCls = parsed.inherited.project ? 'inherited' : '';
+      chips.push(`<span class="qa-chip ${inheritedCls}"><span class="qa-chip-key">project</span> ${parsed.project}</span>`);
+    }
+    if (parsed.category) {
+      const inheritedCls = parsed.inherited.category ? 'inherited' : '';
+      chips.push(`<span class="qa-chip ${inheritedCls}"><span class="qa-chip-key">category</span> ${parsed.category}</span>`);
+    }
+    if (parsed.estimate) {
+      chips.push(`<span class="qa-chip"><span class="qa-chip-key">est</span> ${parsed.estimate}</span>`);
+    }
+
+    if (chips.length === 0) {
+      detected.innerHTML = '<span class="qa-empty">Detected modifiers will appear here as you type…</span>';
+    } else {
+      detected.innerHTML = chips.join('');
+    }
+
+    // Title
+    if (parsed.title) {
+      titleEl.textContent = parsed.title;
+      titleEl.classList.remove('empty');
+    } else {
+      titleEl.textContent = 'empty';
+      titleEl.classList.add('empty');
+    }
+
+    // Subtasks
+    if (parsed.subtasks.length) {
+      subtasksWrap.style.display = 'block';
+      subtasksList.innerHTML = parsed.subtasks.map(st => `<li>${st}</li>`).join('');
+    } else {
+      subtasksWrap.style.display = 'none';
+    }
+
+    return parsed;
+  }
+
+  function submitQuickAdd(startTimer) {
+    const input = document.getElementById('qa-input');
+    const parsed = parseAndRender(input.value);
+    if (!parsed.title) return; // need a title at minimum
+
+    // In real app, this would create the task via API.
+    // Here, just show success and clear (sticky behavior).
+    const successEl = document.getElementById('qa-success');
+    const verb = startTimer ? 'Created + tracking' : 'Created';
+    successEl.textContent = `${verb}: "${parsed.title.length > 38 ? parsed.title.slice(0,38) + '…' : parsed.title}"`;
+    successEl.classList.add('show');
+
+    input.value = '';
+    parseAndRender('');
+    setTimeout(() => successEl.classList.remove('show'), 2000);
+    input.focus();
+  }
+
+  // Wire up keyboard
+  document.addEventListener('keydown', (e) => {
+    // Ctrl+K (and Cmd+K for cross-platform)
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      openQuickAdd();
+      return;
+    }
+    // Esc to close
+    if (e.key === 'Escape') {
+      const bd = document.getElementById('qa-backdrop');
+      if (bd && bd.classList.contains('show')) {
+        e.preventDefault();
+        closeQuickAdd();
+      }
+    }
+  });
+
+  const qaInput = document.getElementById('qa-input');
+  if (qaInput) {
+    qaInput.addEventListener('input', (e) => parseAndRender(e.target.value));
+    qaInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        submitQuickAdd(e.shiftKey);
+      }
+    });
+  }
+
+  // ============== Now Tracking banner — live timer ==============
+  (function liveTimer() {
+    const el = document.getElementById('nt-time');
+    if (!el) return;
+    // Start at 47m 23s and tick up
+    let totalSec = 47 * 60 + 23;
+    function format() {
+      const m = Math.floor(totalSec / 60);
+      const s = totalSec % 60;
+      const mm = String(m).padStart(2, '0');
+      const ss = String(s).padStart(2, '0');
+      el.innerHTML = `${mm}:${ss}<span class="ms"></span>`;
+    }
+    format();
+    setInterval(() => {
+      totalSec++;
+      format();
+    }, 1000);
+  })();
+</script>
+</body>
+</html>

@@ -11,6 +11,7 @@ import { useTheme } from 'react-native-paper';
 import { useStore } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 import { fetchInsights } from '@/lib/insights';
+import { DailyProgressTab } from './insights/DailyProgressTab';
 import type {
   InsightsBucket,
   InsightsPayload,
@@ -20,6 +21,11 @@ import type {
   InsightsTask,
   TrackedSession,
 } from '@/types';
+
+// Phase 7 step A2 — three sub-tabs at the top of Insights matching web:
+// 'daily' (the new Daily Progress card stack), 'time' (existing "where your
+// time went"), 'drift' (placeholder for now — Komal will fill it in later).
+type InsightsSubTab = 'daily' | 'time';
 
 // Palette — light and dark variants switched from theme.dark.
 const LIGHT = {
@@ -241,6 +247,7 @@ export function InsightsView() {
   const profileV2 = useStore((s) => s.profileV2);
   const streak = profileV2?.current_streak ?? 0;
 
+  const [subTab, setSubTab] = useState<InsightsSubTab>('daily');
   const [range, setRange] = useState<InsightsRange>('week');
   const [payload, setPayload] = useState<InsightsPayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -250,6 +257,7 @@ export function InsightsView() {
 
   useEffect(() => {
     if (!userId) return;
+    if (subTab !== 'time') return;
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -271,7 +279,7 @@ export function InsightsView() {
     return () => {
       cancelled = true;
     };
-  }, [range, userId, nonce]);
+  }, [range, userId, nonce, subTab]);
 
   const missingSchema = payload?.missing_label_schema === true;
 
@@ -281,67 +289,131 @@ export function InsightsView() {
       contentContainerStyle={{ padding: 20, paddingBottom: 140, gap: 14 }}
       showsVerticalScrollIndicator={false}
     >
-      <RangeToggle value={range} onChange={setRange} C={C} />
+      <SubTabToggle value={subTab} onChange={setSubTab} C={C} />
 
-      {payload ? (
-        <Text style={{ fontFamily: FONT.m, fontSize: 12, color: C.ink3 }}>
-          {rangeSubtitle(payload)} ·{' '}
-          <Text style={{ color: C.ink2, fontFamily: FONT.sb }}>
-            based on {payload.summary.task_count} tracked task
-            {payload.summary.task_count === 1 ? '' : 's'}
-          </Text>
-        </Text>
-      ) : null}
-
-      {loading && !payload ? <SkeletonCards C={C} /> : null}
-
-      {error && !loading ? (
-        <ErrorCard C={C} message={error} onRetry={() => setNonce((n) => n + 1)} />
-      ) : null}
-
-      {payload ? (
+      {subTab === 'daily' ? (
+        <DailyProgressTab />
+      ) : (
         <>
-          <KpiGrid C={C} payload={payload} streak={streak} />
+          <RangeToggle value={range} onChange={setRange} C={C} />
 
-          <DayShapeCard C={C} range={range} payload={payload} userId={userId} />
+          {payload ? (
+            <Text style={{ fontFamily: FONT.m, fontSize: 12, color: C.ink3 }}>
+              {rangeSubtitle(payload)} ·{' '}
+              <Text style={{ color: C.ink2, fontFamily: FONT.sb }}>
+                based on {payload.summary.task_count} tracked task
+                {payload.summary.task_count === 1 ? '' : 's'}
+              </Text>
+            </Text>
+          ) : null}
 
-          {!missingSchema && payload.categories.length > 0 && (
-            <BarListCard
-              C={C}
-              title="Time by category"
-              subtitle="What kind of work am I doing?"
-              items={payload.categories}
-              totalSeconds={payload.summary.total_seconds}
-            />
-          )}
+          {loading && !payload ? <SkeletonCards C={C} /> : null}
 
-          {!missingSchema && payload.projects.length > 0 && (
-            <BarListCard
-              C={C}
-              title="Time by project"
-              subtitle="What thing am I building?"
-              items={payload.projects}
-              totalSeconds={payload.summary.total_seconds}
-            />
-          )}
+          {error && !loading ? (
+            <ErrorCard C={C} message={error} onRetry={() => setNonce((n) => n + 1)} />
+          ) : null}
 
-          {!missingSchema && payload.projects.length > 0 && (
-            <DrillDownCard
-              C={C}
-              payload={payload}
-              activeProject={activeProject}
-              setActiveProject={setActiveProject}
-            />
-          )}
+          {payload ? (
+            <>
+              <KpiGrid C={C} payload={payload} streak={streak} />
 
-          {payload.tags.length > 0 && <TagsCard C={C} tags={payload.tags} />}
+              <DayShapeCard C={C} range={range} payload={payload} userId={userId} />
 
-          {range === 'today' && userId ? <OffPlanCard C={C} userId={userId} /> : null}
+              {!missingSchema && payload.categories.length > 0 && (
+                <BarListCard
+                  C={C}
+                  title="Time by category"
+                  subtitle="What kind of work am I doing?"
+                  items={payload.categories}
+                  totalSeconds={payload.summary.total_seconds}
+                />
+              )}
 
-          {missingSchema && <MissingSchemaHint C={C} />}
+              {!missingSchema && payload.projects.length > 0 && (
+                <BarListCard
+                  C={C}
+                  title="Time by project"
+                  subtitle="What thing am I building?"
+                  items={payload.projects}
+                  totalSeconds={payload.summary.total_seconds}
+                />
+              )}
+
+              {!missingSchema && payload.projects.length > 0 && (
+                <DrillDownCard
+                  C={C}
+                  payload={payload}
+                  activeProject={activeProject}
+                  setActiveProject={setActiveProject}
+                />
+              )}
+
+              {payload.tags.length > 0 && <TagsCard C={C} tags={payload.tags} />}
+
+              {range === 'today' && userId ? <OffPlanCard C={C} userId={userId} /> : null}
+
+              {missingSchema && <MissingSchemaHint C={C} />}
+            </>
+          ) : null}
         </>
-      ) : null}
+      )}
     </ScrollView>
+  );
+}
+
+// ── Sub-tab toggle (Daily / Time) ──────────────────────────────────────────
+function SubTabToggle({
+  value,
+  onChange,
+  C,
+}: {
+  value: InsightsSubTab;
+  onChange: (v: InsightsSubTab) => void;
+  C: Palette;
+}) {
+  const tabs: { key: InsightsSubTab; label: string }[] = [
+    { key: 'daily', label: 'Daily progress' },
+    { key: 'time', label: 'Where time went' },
+  ];
+  return (
+    <View
+      style={{
+        alignSelf: 'flex-start',
+        flexDirection: 'row',
+        backgroundColor: C.card,
+        borderWidth: 1,
+        borderColor: C.border,
+        borderRadius: 11,
+        padding: 3,
+        gap: 2,
+      }}
+    >
+      {tabs.map((t) => {
+        const on = t.key === value;
+        return (
+          <Pressable
+            key={t.key}
+            onPress={() => onChange(t.key)}
+            style={{
+              paddingVertical: 7,
+              paddingHorizontal: 12,
+              borderRadius: 8,
+              backgroundColor: on ? C.purple : 'transparent',
+            }}
+          >
+            <Text
+              style={{
+                fontFamily: FONT.sb,
+                fontSize: 12,
+                color: on ? '#FFFFFF' : C.ink2,
+              }}
+            >
+              {t.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
   );
 }
 

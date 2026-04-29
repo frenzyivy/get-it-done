@@ -220,10 +220,10 @@ export default function SettingsScreen() {
     const today = new Date().toISOString().slice(0, 10);
     const pick =
       tasks.find(
-        (t) => t.planned_for_date === today && t.status !== 'done',
+        (t) => t.planned_for_date === today && t.effective_status !== 'done',
       ) ??
-      tasks.find((t) => t.status === 'in_progress') ??
-      tasks.find((t) => t.status === 'todo');
+      tasks.find((t) => t.effective_status === 'in_progress') ??
+      tasks.find((t) => t.effective_status === 'todo');
     if (pick) openFocusLockPicker(pick.id);
   };
 

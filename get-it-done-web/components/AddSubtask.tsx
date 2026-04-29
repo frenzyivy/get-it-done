@@ -23,7 +23,7 @@ export function AddSubtask({ onAdd }: { onAdd: (title: string) => void }) {
       {val.trim() && (
         <button
           onClick={submit}
-          className="bg-[#8b5cf6] text-white border-0 rounded-lg px-3 py-[6px] text-xs font-bold cursor-pointer"
+          className="bg-[#1a1a2e] text-white border-0 rounded-lg px-3 py-[6px] text-xs font-bold cursor-pointer"
         >
           Add
         </button>

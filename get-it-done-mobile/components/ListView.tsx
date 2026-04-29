@@ -1,175 +1,203 @@
-import { Fragment, useState, useMemo } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
-import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { useTheme } from 'react-native-paper';
+import { useMemo } from 'react';
+import { ScrollView, Text, View } from 'react-native';
 import { PRIORITY_ORDER } from '@/lib/constants';
 import { useStore } from '@/lib/store';
 import { isToday } from '@/lib/utils';
 import { TaskItem } from './TaskItem';
-import { TodayCard } from './TodayCard';
-import { type as M3Type } from '@/lib/theme';
+import { TODAY_COLORS, TODAY_FONT } from './today/palette';
+import { TodayTopNav } from './today/TodayTopNav';
+import { QuickAddInput } from './today/QuickAddInput';
+import { NowHeroCard } from './today/NowHeroCard';
+import { TodayShapeStrip } from './today/TodayShapeStrip';
+import { SectionHeader, type SectionAccent } from './today/SectionHeader';
 import type { TaskType } from '@/types';
 
-const DONE_COLLAPSED_COUNT = 5;
-
 interface Section {
-  key: string;
+  key: 'in_progress' | 'due_today' | 'up_next' | 'done';
   label: string;
   items: TaskType[];
+  accent: SectionAccent;
 }
 
-function SectionBlock({
-  section,
-  collapsible,
-}: {
-  section: Section;
-  collapsible?: boolean;
-}) {
-  const theme = useTheme();
-  const c = theme.colors;
-  const [expanded, setExpanded] = useState(false);
-  if (section.items.length === 0) return null;
-
-  const isDoneSection = section.key === 'done';
-  const showToggle =
-    collapsible && isDoneSection && section.items.length > DONE_COLLAPSED_COUNT;
-  const visibleItems =
-    showToggle && !expanded
-      ? section.items.slice(0, DONE_COLLAPSED_COUNT)
-      : section.items;
-  const hiddenCount = section.items.length - visibleItems.length;
-
-  return (
-    <View style={{ gap: 8 }}>
-      <View
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          paddingHorizontal: 4,
-        }}
-      >
-        <Text style={{ ...M3Type.labelLarge, color: c.onSurfaceVariant }}>
-          {section.label}
-        </Text>
-        <Text
-          style={{
-            ...M3Type.labelMedium,
-            color: c.onSurfaceVariant,
-            fontVariant: ['tabular-nums'],
-          }}
-        >
-          {section.items.length}
-        </Text>
-      </View>
-
-      <View
-        style={{
-          backgroundColor: c.elevation.level1,
-          borderRadius: 16,
-          overflow: 'hidden',
-        }}
-      >
-        {visibleItems.map((task, i) => (
-          <Fragment key={task.id}>
-            {i > 0 && (
-              <View style={{ height: 1, backgroundColor: c.outlineVariant }} />
-            )}
-            <TaskItem task={task} />
-          </Fragment>
-        ))}
-
-        {showToggle && (
-          <>
-            <View style={{ height: 1, backgroundColor: c.outlineVariant }} />
-            <Pressable
-              onPress={() => setExpanded((v) => !v)}
-              accessibilityRole="button"
-              style={({ pressed }) => ({
-                paddingVertical: 12,
-                paddingHorizontal: 16,
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 6,
-                backgroundColor: pressed ? c.elevation.level2 : 'transparent',
-              })}
-            >
-              <MaterialCommunityIcons
-                name={expanded ? 'chevron-up' : 'chevron-down'}
-                size={18}
-                color={c.primary}
-              />
-              <Text style={{ ...M3Type.labelLarge, color: c.primary }}>
-                {expanded ? 'Show less' : `Show ${hiddenCount} more`}
-              </Text>
-            </Pressable>
-          </>
-        )}
-      </View>
-    </View>
-  );
+function todayISO(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 export function ListView() {
-  const theme = useTheme();
-  const c = theme.colors;
   const tasks = useStore((s) => s.tasks);
+  const activeSessions = useStore((s) => s.activeSessions);
+
+  const hasActive = activeSessions.length > 0;
 
   const sections = useMemo<Section[]>(() => {
     const byPriority = (a: TaskType, b: TaskType) =>
       PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority];
 
-    const inProgress = tasks.filter((t) => t.status === 'in_progress').sort(byPriority);
+    const inProgress = tasks
+      .filter((t) => t.effective_status === 'in_progress')
+      .sort(byPriority);
     const dueToday = tasks
       .filter(
         (t) =>
-          t.status !== 'in_progress' &&
-          t.status !== 'done' &&
+          t.effective_status !== 'in_progress' &&
+          t.effective_status !== 'done' &&
           isToday(t.due_date),
       )
       .sort(byPriority);
     const upNext = tasks
       .filter(
         (t) =>
-          t.status !== 'done' &&
-          t.status !== 'in_progress' &&
+          t.effective_status !== 'done' &&
+          t.effective_status !== 'in_progress' &&
           !isToday(t.due_date),
       )
       .sort(byPriority);
-    const done = tasks.filter((t) => t.status === 'done');
+    const doneItems = tasks
+      .filter(
+        (t) =>
+          t.effective_status === 'done' &&
+          isToday(t.sessions[t.sessions.length - 1]?.started_at),
+      )
+      .sort(byPriority);
 
     return [
-      { key: 'in_progress', label: 'In progress', items: inProgress },
-      { key: 'due_today', label: 'Due today', items: dueToday },
-      { key: 'up_next', label: 'Up next', items: upNext },
-      { key: 'done', label: 'Done', items: done },
+      {
+        key: 'in_progress',
+        label: 'In progress',
+        items: inProgress,
+        accent: 'default',
+      },
+      {
+        key: 'due_today',
+        label: 'Due today',
+        items: dueToday,
+        accent: 'default',
+      },
+      { key: 'up_next', label: '↑ Up next', items: upNext, accent: 'upnext' },
+      {
+        key: 'done',
+        label: '✓ Done today',
+        items: doneItems,
+        accent: 'done',
+      },
     ];
   }, [tasks]);
 
-  const hasAny = sections.some((s) => s.items.length > 0);
+  const today = todayISO();
+
+  // Cell 1 — Done counts. "Total today" = tasks planned for today OR due today,
+  // excluding tasks already completed but not counted under Done today (i.e.
+  // tasks completed on a prior day are irrelevant here).
+  const totalToday = tasks.filter(
+    (t) => t.planned_for_date === today || isToday(t.due_date),
+  ).length;
+  const completedToday = sections.find((s) => s.key === 'done')?.items.length ?? 0;
+
+  // Cell 2 — Invested. Sum of every tracked session that started today.
+  const investedSeconds = tasks
+    .flatMap((t) => t.sessions)
+    .filter((s) => isToday(s.started_at))
+    .reduce((sum, s) => sum + (s.duration_seconds ?? 0), 0);
+  const plannedSeconds =
+    tasks
+      .filter((t) => t.planned_for_date === today && t.effective_status !== 'done')
+      .reduce((sum, t) => sum + (t.estimated_seconds ?? 0), 0) || 8 * 3600;
+
+  // Cell 3 — Off-plan: sessions started today on tasks NOT in today's plan.
+  const todayPlannedIds = new Set(
+    tasks
+      .filter((t) => t.planned_for_date === today)
+      .map((t) => t.id),
+  );
+  const offPlanCount = tasks
+    .flatMap((t) => t.sessions.map((s) => ({ task_id: t.id, started_at: s.started_at })))
+    .filter((s) => isToday(s.started_at) && !todayPlannedIds.has(s.task_id))
+    .length;
 
   return (
     <ScrollView
-      contentContainerStyle={{
-        paddingHorizontal: 16,
-        paddingBottom: 120,
-        gap: 20,
-      }}
+      style={{ backgroundColor: TODAY_COLORS.bg }}
+      contentContainerStyle={{ paddingBottom: 140 }}
     >
-      <TodayCard />
+      <TodayTopNav />
+      <QuickAddInput />
 
-      {!hasAny && (
-        <View style={{ alignItems: 'center', paddingVertical: 40 }}>
-          <Text style={{ ...M3Type.bodyMedium, color: c.onSurfaceVariant }}>
-            No tasks yet. Create one below!
-          </Text>
-        </View>
+      {hasActive && (
+        <>
+          <SectionHeader label="Now tracking" count={null} accent="live" />
+          <NowHeroCard />
+        </>
       )}
 
-      {sections.map((section) => (
-        <SectionBlock key={section.key} section={section} collapsible />
-      ))}
+      <TodayShapeStrip
+        completedToday={completedToday}
+        totalToday={totalToday}
+        investedSeconds={investedSeconds}
+        plannedSeconds={plannedSeconds}
+        offPlanCount={offPlanCount}
+      />
+
+      {sections.map((section) => {
+        if (section.key === 'done' && section.items.length === 0) {
+          return (
+            <View key={section.key} style={{ marginTop: 6 }}>
+              <SectionHeader
+                label={section.label}
+                count={0}
+                accent={section.accent}
+              />
+              <View
+                style={{
+                  marginHorizontal: 20,
+                  marginBottom: 18,
+                  backgroundColor: TODAY_COLORS.card,
+                  borderWidth: 1,
+                  borderColor: TODAY_COLORS.border,
+                  borderStyle: 'dashed',
+                  borderRadius: 12,
+                  paddingVertical: 18,
+                  alignItems: 'center',
+                }}
+              >
+                <Text
+                  style={{
+                    fontFamily: TODAY_FONT.semibold,
+                    fontSize: 13,
+                    color: TODAY_COLORS.ink2,
+                    marginBottom: 3,
+                  }}
+                >
+                  Nothing done yet
+                </Text>
+                <Text
+                  style={{
+                    fontFamily: TODAY_FONT.medium,
+                    fontSize: 11,
+                    color: TODAY_COLORS.ink3,
+                  }}
+                >
+                  Finish what&apos;s tracking to break the 0
+                </Text>
+              </View>
+            </View>
+          );
+        }
+
+        if (section.items.length === 0) return null;
+
+        return (
+          <View key={section.key} style={{ marginTop: 6 }}>
+            <SectionHeader
+              label={section.label}
+              count={section.items.length}
+              accent={section.accent}
+            />
+            {section.items.map((task) => (
+              <TaskItem key={task.id} task={task} />
+            ))}
+          </View>
+        );
+      })}
     </ScrollView>
   );
 }

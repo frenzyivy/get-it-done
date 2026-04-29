@@ -23,7 +23,7 @@ export function KanbanView() {
     () =>
       SEGMENTS.reduce<Record<Status, number>>(
         (acc, s) => {
-          acc[s.id] = tasks.filter((t) => t.status === s.id).length;
+          acc[s.id] = tasks.filter((t) => t.effective_status === s.id).length;
           return acc;
         },
         { todo: 0, in_progress: 0, done: 0 },
@@ -34,7 +34,7 @@ export function KanbanView() {
   const colTasks = useMemo(() => {
     const byPriority = (a: TaskType, b: TaskType) =>
       PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority];
-    return tasks.filter((t) => t.status === colId).sort(byPriority);
+    return tasks.filter((t) => t.effective_status === colId).sort(byPriority);
   }, [tasks, colId]);
 
   return (

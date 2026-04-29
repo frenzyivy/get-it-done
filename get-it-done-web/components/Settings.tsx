@@ -60,7 +60,7 @@ function Toggle({
       <button
         onClick={() => onChange(!checked)}
         className="relative w-11 h-6 rounded-full transition-colors shrink-0 mt-1 cursor-pointer"
-        style={{ backgroundColor: checked ? '#8b5cf6' : '#d1d5db' }}
+        style={{ backgroundColor: checked ? '#1a1a2e' : '#d1d5db' }}
         aria-pressed={checked}
       >
         <span
@@ -86,9 +86,9 @@ export function Settings() {
   const handleStartFocus = () => {
     const today = new Date().toISOString().slice(0, 10);
     const pick =
-      tasks.find((t) => t.planned_for_date === today && t.status !== 'done') ??
-      tasks.find((t) => t.status === 'in_progress') ??
-      tasks.find((t) => t.status === 'todo');
+      tasks.find((t) => t.planned_for_date === today && t.effective_status !== 'done') ??
+      tasks.find((t) => t.effective_status === 'in_progress') ??
+      tasks.find((t) => t.effective_status === 'todo');
     if (pick) openFocusLockPicker(pick.id);
   };
 
@@ -108,7 +108,7 @@ export function Settings() {
     <div
       className="min-h-screen px-4 py-6"
       style={{
-        background: 'linear-gradient(145deg, #f8f7ff 0%, #f0f4ff 50%, #faf5ff 100%)',
+        background: '#e8e8ea',
       }}
     >
       <div className="max-w-[720px] mx-auto">
@@ -118,7 +118,7 @@ export function Settings() {
           </h1>
           <Link
             href="/dashboard"
-            className="text-xs text-[#888] hover:text-[#8b5cf6] font-semibold"
+            className="text-xs text-[#888] hover:text-[#1a1a2e] font-semibold"
           >
             ← Back
           </Link>
@@ -254,7 +254,7 @@ export function Settings() {
             <button
               onClick={handleStartFocus}
               disabled={tasks.length === 0}
-              className="shrink-0 ml-3 px-4 py-2 rounded-lg bg-[#8b5cf6] text-white text-sm font-bold hover:bg-[#7c3aed] disabled:opacity-50"
+              className="shrink-0 ml-3 px-4 py-2 rounded-lg bg-[#1a1a2e] text-white text-sm font-bold hover:bg-[#1a1a2e] disabled:opacity-50"
             >
               Start
             </button>
@@ -347,7 +347,7 @@ function TestNotificationButton() {
       <button
         onClick={send}
         disabled={status === 'sending'}
-        className="text-[13px] font-semibold text-[#7c3aed] hover:underline disabled:opacity-50"
+        className="text-[13px] font-semibold text-[#1a1a2e] hover:underline disabled:opacity-50"
       >
         {status === 'sending' ? 'Sending…' : 'Send test notification'}
       </button>

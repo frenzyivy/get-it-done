@@ -255,11 +255,11 @@ export function TimelineView() {
               <div key={d.date.toISOString()} className="flex items-center gap-3">
                 <div
                   className="w-[90px] shrink-0 text-[12px] font-bold"
-                  style={{ color: isToday ? '#8b5cf6' : isFuture ? '#c8c8d0' : '#1a1a2e' }}
+                  style={{ color: isToday ? '#1a1a2e' : isFuture ? '#c8c8d0' : '#1a1a2e' }}
                 >
                   {dayLabel}
                   {isToday && (
-                    <span className="ml-1 text-[10px] font-extrabold uppercase text-[#8b5cf6]">
+                    <span className="ml-1 text-[10px] font-extrabold uppercase text-[#1a1a2e]">
                       · today
                     </span>
                   )}
@@ -269,7 +269,7 @@ export function TimelineView() {
                     className="h-full rounded-full transition-all"
                     style={{
                       width: `${barPct}%`,
-                      backgroundColor: isToday ? '#8b5cf6' : '#10b981',
+                      backgroundColor: isToday ? '#1a1a2e' : '#10b981',
                     }}
                   />
                 </div>
@@ -289,7 +289,7 @@ export function TimelineView() {
         <button
           onClick={exportCsv}
           disabled={weekSessions.length === 0}
-          className="px-3 py-1 rounded-lg border-[1.5px] border-[#e5e7eb] bg-white text-xs font-bold text-[#666] cursor-pointer hover:border-[#8b5cf6] disabled:opacity-50 disabled:cursor-not-allowed"
+          className="px-3 py-1 rounded-lg border-[1.5px] border-[#e5e7eb] bg-white text-xs font-bold text-[#666] cursor-pointer hover:border-[#1a1a2e] disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Export CSV
         </button>
@@ -403,7 +403,7 @@ function GoalPieCard({
           cy="36"
           r={R}
           fill="none"
-          stroke="#8b5cf6"
+          stroke="#1a1a2e"
           strokeWidth="8"
           strokeDasharray={`${dash} ${C - dash}`}
           strokeDashoffset={C / 4}

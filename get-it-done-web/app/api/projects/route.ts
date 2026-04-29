@@ -5,7 +5,10 @@ export const runtime = 'nodejs';
 
 export const OPTIONS = () => preflight();
 
-const VALID_STATUS = new Set(['active', 'paused', 'archived']);
+// Accepts the full 4-state lifecycle plus the legacy 'paused' state from
+// migration 0019. UI hides 'paused' as a new-action choice but keeps it valid
+// here so existing rows survive PATCH round-trips.
+const VALID_STATUS = new Set(['active', 'paused', 'completed', 'archived']);
 
 // GET /api/projects — all for current user.
 export async function GET() {

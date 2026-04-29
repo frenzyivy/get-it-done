@@ -47,7 +47,7 @@ export function NotificationBell() {
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="relative w-9 h-9 rounded-lg border-[1.5px] border-[#e5e7eb] bg-white flex items-center justify-center cursor-pointer hover:border-[#8b5cf6] transition-colors"
+        className="relative w-9 h-9 rounded-lg border-[1.5px] border-[#e5e7eb] bg-white flex items-center justify-center cursor-pointer hover:border-[#1a1a2e] transition-colors"
         aria-label={`Notifications (${unread} unread)`}
       >
         <span className="text-base">🔔</span>
@@ -67,7 +67,7 @@ export function NotificationBell() {
             {unread > 0 && (
               <button
                 onClick={markAllRead}
-                className="text-[11px] text-[#8b5cf6] font-semibold bg-transparent border-0 cursor-pointer hover:underline"
+                className="text-[11px] text-[#1a1a2e] font-semibold bg-transparent border-0 cursor-pointer hover:underline"
               >
                 Mark all read
               </button>
@@ -84,7 +84,7 @@ export function NotificationBell() {
                 key={n.id}
                 onClick={() => handleItemClick(n)}
                 className={`w-full text-left px-[14px] py-3 border-b border-black/[.04] flex gap-3 cursor-pointer transition-colors ${
-                  n.read_at ? 'bg-white' : 'bg-[rgba(139,92,246,0.04)]'
+                  n.read_at ? 'bg-white' : 'bg-[rgba(0,0,0,0.04)]'
                 } hover:bg-black/[.02]`}
               >
                 <span className="text-lg leading-none shrink-0">
@@ -100,7 +100,7 @@ export function NotificationBell() {
                       {n.title}
                     </span>
                     {!n.read_at && (
-                      <span className="w-2 h-2 rounded-full bg-[#8b5cf6] shrink-0" />
+                      <span className="w-2 h-2 rounded-full bg-[#1a1a2e] shrink-0" />
                     )}
                   </div>
                   {n.body && (

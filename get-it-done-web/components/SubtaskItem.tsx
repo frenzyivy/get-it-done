@@ -60,7 +60,23 @@ export function SubtaskItem({
   };
 
   return (
-    <div className="flex items-center gap-2 py-[5px] border-b border-black/[.04]">
+    <>
+      <style>{`
+        @keyframes subtaskLivePulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.5; transform: scale(1.4); }
+        }
+      `}</style>
+      <div className="flex items-center gap-2 py-[5px] border-b border-black/[.04]">
+      {/* Spec § Task time displays — pulsing dot prefix when this subtask is
+          the active timer, matching the NowTrackingBar visual. */}
+      {isTrackingThis && (
+        <span
+          className="w-[6px] h-[6px] rounded-full bg-[#1a1a2e] shrink-0"
+          style={{ animation: 'subtaskLivePulse 1.4s ease-in-out infinite' }}
+          aria-hidden
+        />
+      )}
       <button
         onClick={onToggle}
         className="w-[18px] h-[18px] rounded-[5px] flex items-center justify-center text-white text-xs shrink-0 transition-all cursor-pointer"
@@ -84,7 +100,7 @@ export function SubtaskItem({
               setEditing(false);
             }
           }}
-          className="flex-1 border-0 border-b-[1.5px] border-[#8b5cf6] outline-none text-[13px] py-[2px] bg-transparent"
+          className="flex-1 border-0 border-b-[1.5px] border-[#1a1a2e] outline-none text-[13px] py-[2px] bg-transparent"
         />
       ) : (
         <span
@@ -98,17 +114,18 @@ export function SubtaskItem({
           {subtask.title}
         </span>
       )}
+      {/* Spec § Task time displays — clean monospace number, no pill. */}
       {subtask.total_time_seconds > 0 && (
-        <span className="text-[10px] font-bold text-[#8b5cf6] bg-[rgba(139,92,246,0.08)] px-[6px] py-[1px] rounded-[5px] whitespace-nowrap shrink-0">
-          🕐 {fmtShort(subtask.total_time_seconds)}
+        <span className="text-[11px] font-mono tabular-nums text-[#666] whitespace-nowrap shrink-0">
+          {fmtShort(subtask.total_time_seconds)}
         </span>
       )}
       <button
         onClick={handlePlay}
         className="w-[22px] h-[22px] rounded-full border-0 cursor-pointer flex items-center justify-center text-[11px] font-bold shrink-0"
         style={{
-          background: isTrackingThis ? '#8b5cf6' : 'rgba(139,92,246,0.1)',
-          color: isTrackingThis ? '#fff' : '#8b5cf6',
+          background: isTrackingThis ? '#1a1a2e' : 'rgba(0,0,0,0.1)',
+          color: isTrackingThis ? '#fff' : '#1a1a2e',
         }}
         title={isTrackingThis ? 'Stop timer' : 'Track this subtask'}
         aria-label={isTrackingThis ? 'Stop timer' : 'Track this subtask'}
@@ -122,6 +139,7 @@ export function SubtaskItem({
       >
         ×
       </button>
-    </div>
+      </div>
+    </>
   );
 }

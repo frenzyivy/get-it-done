@@ -293,7 +293,7 @@ export function FocusModeView() {
                   className="w-full text-left px-4 py-2 hover:bg-black/[.04] bg-transparent border-0 cursor-pointer block"
                   style={{
                     background:
-                      session.mode === m.id ? 'rgba(139,92,246,0.12)' : undefined,
+                      session.mode === m.id ? 'rgba(0,0,0,0.12)' : undefined,
                   }}
                 >
                   <div className="text-[13px] font-bold text-[#1a1a2e]">

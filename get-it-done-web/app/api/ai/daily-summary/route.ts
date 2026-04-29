@@ -38,7 +38,7 @@ export async function POST(req: Request) {
   const [{ data: tasks }, { data: sessions }] = await Promise.all([
     supa
       .from('tasks')
-      .select('id, title, status, priority, estimated_seconds, total_time_seconds')
+      .select('id, title, status, priority, estimated_seconds, total_time_seconds, completed_at')
       .gte('updated_at', dayStart)
       .lte('updated_at', dayEnd),
     supa
@@ -49,8 +49,26 @@ export async function POST(req: Request) {
       .not('ended_at', 'is', null),
   ]);
 
-  const completed = (tasks ?? []).filter((t) => t.status === 'done');
-  const inProgress = (tasks ?? []).filter((t) => t.status === 'in_progress');
+  // Source of truth for "done" is v_task_status, which keys off completed_at.
+  // Fetch effective_status for the touched-today tasks, then bucket. Day
+  // window stays on `updated_at` to preserve current "anything that changed
+  // today" semantics — tightening to completed_at is a separate decision.
+  const taskIds = (tasks ?? []).map((t) => t.id);
+  const { data: statuses } = taskIds.length
+    ? await supa
+        .from('v_task_status')
+        .select('id, effective_status')
+        .in('id', taskIds)
+    : { data: [] as { id: string; effective_status: string }[] };
+  const statusById = new Map<string, string>(
+    (statuses ?? []).map((s) => [s.id as string, s.effective_status as string]),
+  );
+  const completed = (tasks ?? []).filter(
+    (t) => statusById.get(t.id) === 'done',
+  );
+  const inProgress = (tasks ?? []).filter(
+    (t) => statusById.get(t.id) === 'in_progress',
+  );
   const totalTrackedSeconds = (sessions ?? []).reduce(
     (sum, s) => sum + (s.duration_seconds ?? 0),
     0,

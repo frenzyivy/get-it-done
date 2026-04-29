@@ -4,12 +4,14 @@ import { useStore } from '@/lib/store';
 import { PRIORITY_ORDER } from '@/lib/constants';
 import { TaskCard } from './TaskCard';
 import { AddTaskForm } from './AddTaskForm';
+import { matchesFilters } from '@/lib/filters';
 
 export function ListView() {
   const tasks = useStore((s) => s.tasks);
-  const sorted = [...tasks].sort(
-    (a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority],
-  );
+  const filters = useStore((s) => s.filters);
+  const sorted = [...tasks]
+    .filter((t) => matchesFilters(t, filters))
+    .sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]);
 
   return (
     <div>
