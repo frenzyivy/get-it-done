@@ -11,16 +11,43 @@ import {
   type DragEndEvent,
 } from '@dnd-kit/core';
 import { useStore } from '@/lib/store';
+import { useLiveTimers } from '@/lib/useLiveTimer';
 import { fmtShort } from '@/lib/utils';
-import type { PlannedBlock, SubtaskType, TagType, TaskType } from '@/types';
+import type { PlannedBlock, ScheduleSnapMode, SubtaskType, TagType, TaskType } from '@/types';
+import { CreateScheduleModal } from './CreateScheduleModal';
+import { ScheduleMonthGrid } from './ScheduleMonthGrid';
+import { ScheduleWeekView } from './ScheduleWeekView';
+import { ScheduleDateNav } from './ScheduleDateNav';
 
 const HOUR_HEIGHT = 56; // px per hour row
 const START_HOUR = 6;
 const END_HOUR = 23; // exclusive — shows up to 22:00 slot
 const SNAP_MINUTES = 15;
 const MIN_BLOCK_SECONDS = 15 * 60;
+const MAX_BLOCK_SECONDS = 8 * 3600;
 const DEFAULT_BLOCK_SECONDS = 30 * 60;
 const DURATION_PRESETS_MIN = [15, 30, 45, 60, 90, 120, 180] as const;
+
+// Feature 01 — snap helpers. Snap rounds the absolute timestamp / second value
+// (not a relative offset) so 15min/1hr land on real wall-clock boundaries.
+const SNAP_STEP_MS: Record<ScheduleSnapMode, number> = {
+  hour: 60 * 60 * 1000,
+  '15min': 15 * 60 * 1000,
+  free: 60 * 1000,
+};
+const SNAP_STEP_SEC: Record<ScheduleSnapMode, number> = {
+  hour: 3600,
+  '15min': 900,
+  free: 60,
+};
+function snapMs(ms: number, mode: ScheduleSnapMode): number {
+  const step = SNAP_STEP_MS[mode];
+  return Math.round(ms / step) * step;
+}
+function snapSec(sec: number, mode: ScheduleSnapMode): number {
+  const step = SNAP_STEP_SEC[mode];
+  return Math.round(sec / step) * step;
+}
 
 // v2 spec § Schedule view (Phase 6 step 17). Day-block layout split into
 // Planned (left lane) and Tracked (right lane) so the user can see plan vs
@@ -45,6 +72,12 @@ function ymdLocal(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+// Feature 15 — header stat formatter. fmtShort returns "0s" for zero; the
+// spec wants a bare "0" so the empty-day header reads cleanly.
+function fmtStat(secs: number): string {
+  return secs <= 0 ? '0' : fmtShort(secs);
+}
+
 export function ScheduleView() {
   const tasks = useStore((s) => s.tasks);
   const plannedBlocks = useStore((s) => s.plannedBlocks);
@@ -54,29 +87,54 @@ export function ScheduleView() {
   const deletePlannedBlock = useStore((s) => s.deletePlannedBlock);
   const daySessions = useStore((s) => s.daySessions);
   const fetchDaySessions = useStore((s) => s.fetchDaySessions);
+  const dayStats = useStore((s) => s.dayStats);
+  const fetchDayStats = useStore((s) => s.fetchDayStats);
+  const liveElapsedById = useLiveTimers();
   const tags = useStore((s) => s.tags);
   const userId = useStore((s) => s.userId);
   const activeSessions = useStore((s) => s.activeSessions);
+  const snapMode = useStore((s) => s.prefs?.schedule_snap_mode ?? 'hour');
+  const updatePrefs = useStore((s) => s.updatePrefs);
+  // Feature 09 (minimal) — sub-tab + cross-sub-view selected date.
+  const scheduleSubView = useStore((s) => s.scheduleSubView);
+  const setScheduleSubView = useStore((s) => s.setScheduleSubView);
+  const scheduleDayStartMs = useStore((s) => s.scheduleDayStartMs);
+  const setScheduleDayStart = useStore((s) => s.setScheduleDayStart);
+  // Feature 11 — Week view drills into Day at a specific hour by setting this
+  // intent; Day consumes and clears it on mount.
+  const pendingScrollHour = useStore((s) => s.pendingScrollHour);
+  const setPendingScrollHour = useStore((s) => s.setPendingScrollHour);
 
   const [now, setNow] = useState(() => new Date());
+  // Body container for the Day-mode hour grid. Used to scroll-to-hour when the
+  // Week view drills in at a specific hour.
+  const dayBodyRef = useRef<HTMLDivElement | null>(null);
 
-  const dayStart = useMemo(() => {
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    return d;
-  }, []);
+  // Feature 08 — selected date drives the grid. Mirrors the store's
+  // `scheduleDayStartMs` so the Month grid can drill into a specific day,
+  // while local writes (CreateScheduleModal, day nav) push back to the store.
+  const dayStart = useMemo(() => new Date(scheduleDayStartMs), [scheduleDayStartMs]);
+  const setDayStart = useCallback(
+    (d: Date) => {
+      setScheduleDayStart(d);
+    },
+    [setScheduleDayStart],
+  );
   const dayEnd = useMemo(() => {
     const d = new Date(dayStart);
     d.setDate(d.getDate() + 1);
     return d;
   }, [dayStart]);
+
+  const [createOpen, setCreateOpen] = useState(false);
   const dayKey = useMemo(() => ymdLocal(dayStart), [dayStart]);
 
   useEffect(() => {
     if (!userId) return;
     void fetchPlannedBlocks(dayStart.toISOString(), dayEnd.toISOString());
     void fetchDaySessions(dayKey);
-  }, [userId, fetchPlannedBlocks, fetchDaySessions, dayStart, dayEnd, dayKey]);
+    void fetchDayStats(dayKey);
+  }, [userId, fetchPlannedBlocks, fetchDaySessions, fetchDayStats, dayStart, dayEnd, dayKey]);
 
   // Refetch tracked sessions every minute while a session is active so the
   // current bar grows in near-real-time. When nothing is live, no refetch.
@@ -84,20 +142,44 @@ export function ScheduleView() {
     if (activeSessions.length === 0) return;
     const id = setInterval(() => {
       void fetchDaySessions(dayKey, true);
+      void fetchDayStats(dayKey, true);
     }, 60_000);
     return () => clearInterval(id);
-  }, [activeSessions.length, fetchDaySessions, dayKey]);
+  }, [activeSessions.length, fetchDaySessions, fetchDayStats, dayKey]);
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 60_000);
     return () => clearInterval(id);
   }, []);
 
+  // Feature 11 — consume `pendingScrollHour` set by the Week view's body-cell
+  // click. Only fires when Day is the active sub-view and the body is mounted.
+  useEffect(() => {
+    if (scheduleSubView !== 'day') return;
+    if (pendingScrollHour == null) return;
+    const body = dayBodyRef.current;
+    if (!body) return;
+    const clamped = Math.max(START_HOUR, Math.min(END_HOUR - 1, pendingScrollHour));
+    const offsetTop = (clamped - START_HOUR) * HOUR_HEIGHT;
+    const targetY = body.getBoundingClientRect().top + window.scrollY + offsetTop;
+    window.scrollTo({ top: targetY, behavior: 'smooth' });
+    setPendingScrollHour(null);
+  }, [scheduleSubView, pendingScrollHour, setPendingScrollHour]);
+
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
-  const openTasks = useMemo(
-    () => tasks.filter((t) => t.effective_status !== 'done'),
-    [tasks],
+  // Sidebar status filter — local, in-memory, defaults to "open" each load.
+  // Replaces the global search input that used to live here; the global
+  // `searchQuery` store slice still drives Board/List/Priority.
+  const [sidebarStatus, setSidebarStatus] = useState<'open' | 'done' | 'all'>('open');
+  const sidebarTasks = useMemo(
+    () =>
+      tasks.filter((t) => {
+        if (sidebarStatus === 'open') return t.effective_status !== 'done';
+        if (sidebarStatus === 'done') return t.effective_status === 'done';
+        return true;
+      }),
+    [tasks, sidebarStatus],
   );
 
   const blocksByHour = useMemo(() => {
@@ -135,6 +217,62 @@ export function ScheduleView() {
     (now.getHours() - START_HOUR) * HOUR_HEIGHT +
     (now.getMinutes() / 60) * HOUR_HEIGHT;
 
+  // Feature 01 — minute-precise body drag for existing blocks. dnd-kit only
+  // tells us which hour the drop landed in (drop-on-target), so reschedule
+  // moves are handled by raw pointer events instead. The palette → grid
+  // creation flow below stays on dnd-kit (it doesn't need minute precision).
+  const [dragPreview, setDragPreview] = useState<{
+    blockId: string;
+    startMs: number;
+    durationSec: number;
+  } | null>(null);
+
+  const dayStartMs = dayStart.getTime();
+
+  const handleMoveStart = useCallback(
+    (block: PlannedBlock, e: React.PointerEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      const startY = e.clientY;
+      const originalStartMs = new Date(block.start_at).getTime();
+      const durationSec = block.duration_seconds;
+      // Day-grid bounds: clamp so start_at ≥ START_HOUR:00 and end_at ≤ END_HOUR:00.
+      const dayMinD = new Date(dayStartMs);
+      dayMinD.setHours(START_HOUR, 0, 0, 0);
+      const dayMaxD = new Date(dayStartMs);
+      dayMaxD.setHours(END_HOUR, 0, 0, 0);
+      const minMs = dayMinD.getTime();
+      const maxMs = dayMaxD.getTime() - durationSec * 1000;
+
+      setDragPreview({ blockId: block.id, startMs: originalStartMs, durationSec });
+
+      let lastSnappedMs = originalStartMs;
+      const onMove = (ev: PointerEvent) => {
+        const deltaPx = ev.clientY - startY;
+        const deltaMs = (deltaPx / HOUR_HEIGHT) * 60 * 60 * 1000;
+        const rawMs = originalStartMs + deltaMs;
+        const snapped = snapMs(rawMs, snapMode);
+        const clamped = Math.max(minMs, Math.min(maxMs, snapped));
+        lastSnappedMs = clamped;
+        setDragPreview({ blockId: block.id, startMs: clamped, durationSec });
+      };
+      const onUp = () => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onUp);
+        setDragPreview(null);
+        if (lastSnappedMs !== originalStartMs) {
+          void updatePlannedBlock(block.id, {
+            start_at: new Date(lastSnappedMs).toISOString(),
+          });
+        }
+      };
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', onUp);
+    },
+    [dayStartMs, snapMode, updatePlannedBlock],
+  );
+
   const handleDragEnd = (e: DragEndEvent) => {
     if (!e.over) return;
     const activeId = String(e.active.id);
@@ -144,20 +282,7 @@ export function ScheduleView() {
     // Drag IDs:
     //   `task__<taskId>`             — task palette → schedule (creates block)
     //   `subtask__<taskId>__<subId>` — subtask palette → schedule (creates block)
-    //   `block__<blockId>`           — existing block being rescheduled
-    if (activeId.startsWith('block__')) {
-      const blockId = activeId.slice('block__'.length);
-      const block = plannedBlocks.find((b) => b.id === blockId);
-      if (!block) return;
-      const startAt = new Date(dayStart);
-      const existingMinutes = new Date(block.start_at).getMinutes();
-      startAt.setHours(targetHour, existingMinutes, 0, 0);
-      const newStartIso = startAt.toISOString();
-      if (newStartIso === block.start_at) return;
-      void updatePlannedBlock(blockId, { start_at: newStartIso });
-      return;
-    }
-
+    // Existing-block reschedule is handled via handleMoveStart (raw pointer events).
     let taskId: string;
     let subtaskId: string | null = null;
     if (activeId.startsWith('subtask__')) {
@@ -188,39 +313,93 @@ export function ScheduleView() {
   };
 
   const plannedSeconds = plannedBlocks.reduce((s, b) => s + b.duration_seconds, 0);
+  // Feature 15 — server-aggregated closed-session total (already net of
+  // break_seconds per Feature 05) plus the live elapsed for any running
+  // session whose started_at falls on the selected day. The live elapsed
+  // already excludes break time via useLiveTimers().
   const trackedSeconds = useMemo(() => {
-    if (!daySessions) return 0;
-    let total = 0;
-    const nowMs = now.getTime();
-    for (const s of daySessions.sessions) {
-      const start = new Date(s.started_at).getTime();
-      const end = s.ended_at ? new Date(s.ended_at).getTime() : nowMs;
-      // Clip to today's window so a midnight-crosser doesn't double count.
-      const dayStartMs = dayStart.getTime();
-      const dayEndMs = dayEnd.getTime();
-      const clipped = Math.max(0, Math.min(end, dayEndMs) - Math.max(start, dayStartMs));
-      total += Math.round(clipped / 1000);
+    const serverClosed = dayStats?.date === dayKey ? dayStats.tracked_seconds : 0;
+    let live = 0;
+    for (const s of activeSessions) {
+      if (ymdLocal(new Date(s.started_at)) === dayKey) {
+        live += liveElapsedById[s.id] ?? 0;
+      }
     }
-    return total;
-  }, [daySessions, dayStart, dayEnd, now]);
+    return serverClosed + live;
+  }, [dayStats, dayKey, activeSessions, liveElapsedById]);
+
+  const subTabs: { key: 'day' | 'week' | 'month'; label: string }[] = [
+    { key: 'day', label: 'Day' },
+    { key: 'week', label: 'Week' },
+    { key: 'month', label: 'Month' },
+  ];
+
+  const tabStrip = (
+    <div className="mb-3 flex items-center justify-between gap-3">
+      <div className="inline-flex items-center rounded-full border border-[#e5e7eb] bg-white p-0.5">
+        {subTabs.map((t) => {
+          const active = scheduleSubView === t.key;
+          return (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setScheduleSubView(t.key)}
+              className={`rounded-full px-4 py-1 text-[12px] font-semibold transition-colors ${
+                active ? 'bg-[#1a1a2e] text-white' : 'text-[#6b7280] hover:text-[#1a1a2e]'
+              }`}
+            >
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+      <ScheduleDateNav />
+    </div>
+  );
+
+  if (scheduleSubView === 'month') {
+    return (
+      <div>
+        {tabStrip}
+        <ScheduleMonthGrid />
+      </div>
+    );
+  }
+
+  if (scheduleSubView === 'week') {
+    return (
+      <div>
+        {tabStrip}
+        <ScheduleWeekView />
+      </div>
+    );
+  }
 
   return (
     <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+      {tabStrip}
       <div className="grid grid-cols-[1fr_240px] gap-4">
         <div
           className="rounded-[14px] overflow-hidden"
           style={{ background: '#fff', border: '1px solid #e5e7eb' }}
         >
-          <div className="px-4 py-3 flex items-center justify-between border-b border-[#e5e7eb]">
-            <div className="text-[13px] font-extrabold uppercase tracking-[0.5px] text-[#1a1a2e]">
-              {dayStart.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' })}
-            </div>
+          <div className="px-4 py-3 flex items-center justify-end border-b border-[#e5e7eb]">
             <div className="flex items-center gap-4 text-[11px] font-mono uppercase tracking-[1px] text-[#9ca3af]">
-              <span>
-                Planned <span className="font-extrabold text-[#1a1a2e] tabular-nums normal-case">{fmtShort(plannedSeconds)}</span>
+              <button
+                onClick={() => setCreateOpen(true)}
+                className="bg-[#1a1a2e] text-white text-[12px] font-bold px-3 py-1.5 rounded-full border-0 cursor-pointer normal-case tracking-normal hover:opacity-90"
+              >
+                + Create schedule
+              </button>
+              <SnapToggle
+                mode={snapMode}
+                onChange={(m) => void updatePrefs({ schedule_snap_mode: m })}
+              />
+              <span title="Planned = sum of scheduled block durations for this day.">
+                Planned <span className="font-extrabold text-[#1a1a2e] tabular-nums normal-case">{fmtStat(plannedSeconds)}</span>
               </span>
-              <span>
-                Tracked <span className="font-extrabold text-[#1a1a2e] tabular-nums normal-case">{fmtShort(trackedSeconds)}</span>
+              <span title="Tracked = time logged on this day, excluding breaks.">
+                Tracked <span className="font-extrabold text-[#1a1a2e] tabular-nums normal-case">{fmtStat(trackedSeconds)}</span>
               </span>
             </div>
           </div>
@@ -236,7 +415,7 @@ export function ScheduleView() {
             </div>
           </div>
 
-          <div className="relative">
+          <div ref={dayBodyRef} className="relative">
             {Array.from({ length: END_HOUR - START_HOUR }, (_, i) => START_HOUR + i).map((h) => (
               <HourRow
                 key={h}
@@ -246,10 +425,59 @@ export function ScheduleView() {
                 tasks={tasks}
                 tags={tags}
                 nowMs={now.getTime()}
+                snapMode={snapMode}
                 onDelete={deletePlannedBlock}
                 onUpdate={updatePlannedBlock}
+                onMoveStart={handleMoveStart}
+                draggingBlockId={dragPreview?.blockId ?? null}
               />
             ))}
+            {dragPreview && (() => {
+              const block = plannedBlocks.find((b) => b.id === dragPreview.blockId);
+              if (!block) return null;
+              const previewStart = new Date(dragPreview.startMs);
+              const offsetMin =
+                (previewStart.getHours() - START_HOUR) * 60 + previewStart.getMinutes();
+              const topPx = (offsetMin / 60) * HOUR_HEIGHT;
+              const heightPx = Math.max(14, (dragPreview.durationSec / 3600) * HOUR_HEIGHT);
+              const task = tasks.find((t) => t.id === block.task_id);
+              const subtask = block.subtask_id
+                ? task?.subtasks.find((s) => s.id === block.subtask_id) ?? null
+                : null;
+              const tagColor =
+                (task?.tag_ids[0] && tags.find((x) => x.id === task.tag_ids[0])?.color) ||
+                '#1a1a2e';
+              const label = subtask?.title ?? task?.title ?? 'Untitled block';
+              const endMs = dragPreview.startMs + dragPreview.durationSec * 1000;
+              const endD = new Date(endMs);
+              const fmt = (d: Date) =>
+                `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+              // Position in the Planned lane: left col 56px, planned lane is the
+              // first 1fr of `56px 1fr 1fr`. Approximate by left=56px and width
+              // = (gridWidth-56)/2. We use percentages so it stays in sync.
+              return (
+                <div
+                  className="absolute pointer-events-none z-[3] rounded-lg px-2 py-1"
+                  style={{
+                    top: topPx,
+                    height: heightPx - 2,
+                    left: 'calc(56px + 4px)',
+                    width: 'calc((100% - 56px) / 2 - 8px)',
+                    background: '#fff',
+                    borderLeft: `3px solid ${tagColor}`,
+                    boxShadow: '0 8px 24px rgba(0,0,0,0.18), 0 0 0 1px #e5e7eb',
+                    opacity: 0.95,
+                  }}
+                >
+                  <div className="text-[11px] font-bold text-[#1a1a2e] truncate pr-2">
+                    {label}
+                  </div>
+                  <div className="text-[10px] text-[#1a1a2e] tabular-nums font-semibold">
+                    {fmt(previewStart)} → {fmt(endD)}
+                  </div>
+                </div>
+              );
+            })()}
             {nowWithinGrid && (
               <div
                 className="absolute left-[56px] right-2 h-[2px] pointer-events-none z-10"
@@ -271,19 +499,107 @@ export function ScheduleView() {
           <div className="text-[10px] font-mono uppercase tracking-[1px] text-[#9ca3af] mb-2">
             Drag a task →
           </div>
+          <div className="mb-2">
+            <SidebarStatusFilter value={sidebarStatus} onChange={setSidebarStatus} />
+          </div>
           <div className="flex flex-col gap-[6px] max-h-[calc(100vh-200px)] overflow-y-auto">
-            {openTasks.length === 0 && (
+            {sidebarTasks.length === 0 && (
               <div className="text-[12px] text-[#9ca3af] py-4 text-center">
-                No open tasks. Add one on the Board.
+                {sidebarStatus === 'done'
+                  ? 'No completed tasks yet.'
+                  : sidebarStatus === 'open'
+                    ? 'No open tasks. Add one on the Board.'
+                    : 'No tasks. Add one on the Board.'}
               </div>
             )}
-            {openTasks.map((t) => (
+            {sidebarTasks.map((t) => (
               <DraggableTaskWithSubtasks key={t.id} task={t} tags={tags} />
             ))}
           </div>
         </div>
       </div>
+      <CreateScheduleModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onSavedForDate={(iso) => {
+          const d = new Date(`${iso}T00:00:00`);
+          d.setHours(0, 0, 0, 0);
+          setDayStart(d);
+        }}
+      />
     </DndContext>
+  );
+}
+
+function SnapToggle({
+  mode,
+  onChange,
+}: {
+  mode: ScheduleSnapMode;
+  onChange: (m: ScheduleSnapMode) => void;
+}) {
+  const opts: { key: ScheduleSnapMode; label: string }[] = [
+    { key: 'hour', label: '1 hr' },
+    { key: '15min', label: '15 min' },
+    { key: 'free', label: 'Free' },
+  ];
+  return (
+    <div className="flex items-center rounded-md overflow-hidden border border-[#e5e7eb]">
+      {opts.map((o) => {
+        const active = mode === o.key;
+        return (
+          <button
+            key={o.key}
+            type="button"
+            onClick={() => onChange(o.key)}
+            title={`Snap to ${o.label}`}
+            className="text-[10px] font-mono uppercase tracking-[1px] px-2 py-[3px] cursor-pointer border-0"
+            style={{
+              background: active ? '#1a1a2e' : 'transparent',
+              color: active ? '#fff' : '#71717a',
+            }}
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function SidebarStatusFilter({
+  value,
+  onChange,
+}: {
+  value: 'open' | 'done' | 'all';
+  onChange: (v: 'open' | 'done' | 'all') => void;
+}) {
+  const opts: { key: 'open' | 'done' | 'all'; label: string }[] = [
+    { key: 'open', label: 'Open' },
+    { key: 'done', label: 'Done' },
+    { key: 'all', label: 'All' },
+  ];
+  return (
+    <div className="flex items-center rounded-md overflow-hidden border border-[#e5e7eb] w-full">
+      {opts.map((o) => {
+        const active = value === o.key;
+        return (
+          <button
+            key={o.key}
+            type="button"
+            onClick={() => onChange(o.key)}
+            title={`Show ${o.label.toLowerCase()} tasks`}
+            className="flex-1 text-[10px] font-mono uppercase tracking-[1px] px-2 py-[5px] cursor-pointer border-0"
+            style={{
+              background: active ? '#1a1a2e' : 'transparent',
+              color: active ? '#fff' : '#71717a',
+            }}
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -294,8 +610,11 @@ function HourRow({
   tasks,
   tags,
   nowMs,
+  snapMode,
   onDelete,
   onUpdate,
+  onMoveStart,
+  draggingBlockId,
 }: {
   hour: number;
   blocks: PlannedBlock[];
@@ -303,8 +622,11 @@ function HourRow({
   tasks: TaskType[];
   tags: TagType[];
   nowMs: number;
+  snapMode: ScheduleSnapMode;
   onDelete: (id: string) => void;
   onUpdate: (id: string, updates: Partial<PlannedBlock>) => Promise<void>;
+  onMoveStart: (block: PlannedBlock, e: React.PointerEvent<HTMLDivElement>) => void;
+  draggingBlockId: string | null;
 }) {
   const { isOver, setNodeRef } = useDroppable({ id: `hour-${hour}` });
   return (
@@ -327,8 +649,11 @@ function HourRow({
             tasks={tasks}
             tags={tags}
             hour={hour}
+            snapMode={snapMode}
+            isDraggingPreview={draggingBlockId === b.id}
             onDelete={onDelete}
             onUpdate={onUpdate}
+            onMoveStart={onMoveStart}
           />
         ))}
       </div>
@@ -349,15 +674,21 @@ function BlockCard({
   tasks,
   tags,
   hour,
+  snapMode,
+  isDraggingPreview,
   onDelete,
   onUpdate,
+  onMoveStart,
 }: {
   block: PlannedBlock;
   tasks: TaskType[];
   tags: TagType[];
   hour: number;
+  snapMode: ScheduleSnapMode;
+  isDraggingPreview: boolean;
   onDelete: (id: string) => void;
   onUpdate: (id: string, updates: Partial<PlannedBlock>) => Promise<void>;
+  onMoveStart: (block: PlannedBlock, e: React.PointerEvent<HTMLDivElement>) => void;
 }) {
   const start = new Date(block.start_at);
   const task = tasks.find((t) => t.id === block.task_id);
@@ -380,15 +711,9 @@ function BlockCard({
   const primaryLabel = subtask?.title ?? task?.title ?? 'Untitled block';
   const secondaryLabel = subtask ? task?.title ?? null : null;
 
-  // Make the block itself draggable to reschedule. The resize handle and the
-  // top-right buttons stop propagation so they don't trigger a drag.
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
-    id: `block__${block.id}`,
-  });
-
   const commitDuration = useCallback(
     (seconds: number) => {
-      const clamped = Math.max(MIN_BLOCK_SECONDS, seconds);
+      const clamped = Math.min(MAX_BLOCK_SECONDS, Math.max(MIN_BLOCK_SECONDS, seconds));
       if (clamped === block.duration_seconds) return;
       void onUpdate(block.id, { duration_seconds: clamped });
     },
@@ -399,6 +724,13 @@ function BlockCard({
     const next = effectiveDuration + deltaMinutes * 60;
     commitDuration(next);
   };
+
+  // Resize: bottom 6px handle. Snap step now follows the user's snap mode.
+  // Day-end clamp: end_at must not exceed END_HOUR:00.
+  const blockStartMs = start.getTime();
+  const dayEndForBlock = new Date(start);
+  dayEndForBlock.setHours(END_HOUR, 0, 0, 0);
+  const maxDurationByDay = Math.floor((dayEndForBlock.getTime() - blockStartMs) / 1000);
 
   const dragStateRef = useRef<{ startY: number; startSec: number } | null>(null);
   const onResizePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -412,9 +744,12 @@ function BlockCard({
     if (!st) return;
     const deltaPx = e.clientY - st.startY;
     const deltaSec = (deltaPx / HOUR_HEIGHT) * 3600;
-    const snap = SNAP_MINUTES * 60;
-    const snapped = Math.round((st.startSec + deltaSec) / snap) * snap;
-    setLiveDuration(Math.max(MIN_BLOCK_SECONDS, snapped));
+    const snapped = snapSec(st.startSec + deltaSec, snapMode);
+    const clamped = Math.min(
+      MAX_BLOCK_SECONDS,
+      Math.min(maxDurationByDay, Math.max(MIN_BLOCK_SECONDS, snapped)),
+    );
+    setLiveDuration(clamped);
   };
   const onResizePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     const st = dragStateRef.current;
@@ -432,17 +767,20 @@ function BlockCard({
 
   return (
     <div
-      ref={setNodeRef}
-      {...listeners}
-      {...attributes}
+      onPointerDown={(e) => {
+        // Only initiate move if pointerdown is on the body itself (not on
+        // children that stopPropagation: resize handle, action buttons, menu).
+        if (e.button !== 0) return;
+        onMoveStart(block, e);
+      }}
       className="absolute left-1 right-1 rounded-lg px-2 py-1 group z-[1] hover:z-[2]"
       style={{
         top: topPx,
         height: heightPx - 2,
         background: 'rgba(0,0,0,0.06)',
         borderLeft: `3px solid ${tagColor}`,
-        cursor: isDragging ? 'grabbing' : 'grab',
-        opacity: isDragging ? 0.4 : 1,
+        cursor: isDraggingPreview ? 'grabbing' : 'grab',
+        opacity: isDraggingPreview ? 0.4 : 1,
         touchAction: 'none',
       }}
       title={subtask ? `${task?.title ?? ''} — ${subtask.title}` : task?.title ?? 'Untitled'}

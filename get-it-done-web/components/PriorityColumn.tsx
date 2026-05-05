@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { TaskCard } from './TaskCard';
+import { PriorityTaskCard } from './PriorityTaskCard';
 import { AddTaskForm } from './AddTaskForm';
 import type { Priority, TaskType } from '@/types';
 
@@ -94,7 +94,7 @@ export function PriorityColumn({ label, addPriority, tasks, variant }: Props) {
                 transition: 'opacity 200ms',
               }}
             >
-              <TaskCard task={t} compact />
+              <PriorityTaskCard task={t} />
             </div>
           ))
         )}

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fmt } from '@/lib/utils';
 import { useStore } from '@/lib/store';
-import { useLiveTimers } from '@/lib/useLiveTimer';
+import { useLiveBreaks, useLiveTimers } from '@/lib/useLiveTimer';
 import type { FocusMode } from '@/types';
 import { BreakingOutModal } from './BreakingOutModal';
 
@@ -26,7 +26,8 @@ export function FocusModeView() {
   const tasks = useStore((s) => s.tasks);
   const prefs = useStore((s) => s.prefs);
   const stopSession = useStore((s) => s.stopSession);
-  const pauseSession = useStore((s) => s.pauseSession);
+  const startBreak = useStore((s) => s.startBreak);
+  const endBreak = useStore((s) => s.endBreak);
   const updateSessionMode = useStore((s) => s.updateSessionMode);
   const appendDriftEvent = useStore((s) => s.appendDriftEvent);
   const closeFocusMode = useStore((s) => s.closeFocusMode);
@@ -36,6 +37,7 @@ export function FocusModeView() {
   const profileV2 = useStore((s) => s.profileV2);
 
   const elapsedMap = useLiveTimers();
+  const breakMap = useLiveBreaks();
 
   const session = useMemo(
     () => activeSessions.find((s) => s.id === focusSessionId) ?? null,
@@ -48,8 +50,11 @@ export function FocusModeView() {
     null,
   );
   const [modePickerOpen, setModePickerOpen] = useState(false);
-  const [paused, setPaused] = useState(false);
   const [breakingOut, setBreakingOut] = useState(false);
+  // Feature 03 — confirm-on-Stop. Strict mid-planned-block still routes to
+  // BreakingOutModal (that *is* the confirm there); every other branch goes
+  // through this overlay.
+  const [confirmingStop, setConfirmingStop] = useState(false);
 
   const task = session ? tasks.find((t) => t.id === session.task_id) ?? null : null;
   const subtask = session && task
@@ -140,39 +145,67 @@ export function FocusModeView() {
     closeFocusMode();
   }, [closeFocusMode]);
 
-  const handleStop = useCallback(async () => {
+  const handleStop = useCallback(() => {
     if (!session) return;
     const elapsedSecs =
       (Date.now() - new Date(session.started_at).getTime()) / 1000;
     const planned = session.planned_duration_seconds;
-    // Strict + planned block still running → gate on BreakingOutModal. The
-    // write (broken=true + reason) lives inside the modal's onConfirm.
+    // Strict + planned block still running → BreakingOutModal is the confirm.
+    // The write (broken=true + reason) lives inside the modal's onConfirm.
     if (session.mode === 'strict' && planned != null && elapsedSecs < planned) {
       setBreakingOut(true);
       return;
     }
-    // Planned block reached zero — count it toward the streak.
-    if (planned != null && elapsedSecs >= planned) {
-      await completeSession(session.id);
-    } else {
-      await stopSession(session.id);
-    }
-    if (document.fullscreenElement) {
-      document.exitFullscreen?.().catch(() => undefined);
+    // Every other branch: open the inline confirm overlay. Actual stop write
+    // happens in performStop.
+    setConfirmingStop(true);
+  }, [session]);
+
+  const performStop = useCallback(async () => {
+    if (!session) return;
+    const elapsedSecs =
+      (Date.now() - new Date(session.started_at).getTime()) / 1000;
+    const planned = session.planned_duration_seconds;
+    try {
+      // Planned block reached zero — count it toward the streak.
+      if (planned != null && elapsedSecs >= planned) {
+        await completeSession(session.id);
+      } else {
+        await stopSession(session.id);
+      }
+      if (document.fullscreenElement) {
+        document.exitFullscreen?.().catch(() => undefined);
+      }
+    } catch {
+      useStore.getState().showToast('Could not stop timer — please retry.');
+    } finally {
+      setConfirmingStop(false);
     }
   }, [session, stopSession, completeSession]);
 
-  const handlePause = useCallback(async () => {
+  // Feature 05 — Break replaces Pause in the focus view too. Toggling the
+  // break flag on/off keeps the session row alive while tracked seconds
+  // freeze. Resume rolls the live break delta into break_seconds.
+  const handleToggleBreak = useCallback(async () => {
     if (!session) return;
-    setPaused(true);
-    await pauseSession(session.id);
-  }, [session, pauseSession]);
+    if (session.is_on_break) {
+      await endBreak(session.id);
+    } else {
+      await startBreak(session.id);
+    }
+  }, [session, startBreak, endBreak]);
 
-  // Esc: Strict + still in planned block → BreakingOutModal; else minimize.
+  // Esc: confirm dialog open → close dialog; Strict + still in planned block →
+  // BreakingOutModal; else minimize.
   useEffect(() => {
     if (!session) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      if (confirmingStop) {
+        e.preventDefault();
+        setConfirmingStop(false);
+        return;
+      }
       if (session.mode === 'strict') {
         const elapsedSecs =
           (Date.now() - new Date(session.started_at).getTime()) / 1000;
@@ -187,12 +220,13 @@ export function FocusModeView() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [session, handleMinimize]);
+  }, [session, handleMinimize, confirmingStop]);
 
   if (!session) return null;
 
   const elapsed = elapsedMap[session.id] ?? 0;
   const displayTime = fmt(elapsed);
+  const brk = breakMap[session.id] ?? { breakAccrued: 0, isOnBreak: false };
   const otherActive = activeSessions.filter((s) => s.id !== session.id);
 
   return (
@@ -247,27 +281,33 @@ export function FocusModeView() {
         )}
       </div>
 
-      {/* Middle — big time + 3 controls */}
+      {/* Middle — big time + controls. Feature 05: Break/Resume replaces the
+          legacy Pause/Resume pair. While on break, the big timer freezes and
+          a small amber "On break · MM:SS" pill appears beneath it. */}
       <div className="flex flex-col items-center gap-8">
         <div className="text-[96px] leading-[1] font-extrabold tabular-nums tracking-[-4px]">
           {displayTime}
         </div>
+        {brk.isOnBreak && (
+          <div
+            className="rounded-full px-4 py-[6px] text-[12px] font-mono font-bold uppercase tracking-[1px]"
+            style={{ background: '#92400e', color: '#fef3c7' }}
+            aria-live="polite"
+          >
+            On break · {fmt(brk.breakAccrued)} · not counted
+          </div>
+        )}
         <div className="flex items-center gap-6">
-          <ControlButton
-            icon="⏸"
-            label="Pause"
-            onClick={handlePause}
-            disabled={paused}
-          />
-          <ControlButton
-            icon="▶"
-            label={paused ? 'Resume' : 'Running'}
-            onClick={() => {
-              // Paused resume requires restarting — hand back to task card.
-              handleMinimize();
-            }}
-            disabled={!paused}
-          />
+          {!brk.isOnBreak ? (
+            <ControlButton icon="⏸" label="Break" onClick={handleToggleBreak} />
+          ) : (
+            <ControlButton
+              icon="▶"
+              label="Resume"
+              onClick={handleToggleBreak}
+              accent
+            />
+          )}
           <ControlButton icon="⏹" label="Stop" onClick={handleStop} danger />
         </div>
       </div>
@@ -312,6 +352,44 @@ export function FocusModeView() {
           Minimize (timer keeps running)
         </button>
       </div>
+      {confirmingStop && (
+        <div
+          role="alertdialog"
+          aria-modal="true"
+          aria-label="Confirm stop"
+          className="absolute inset-0 z-[110] flex items-center justify-center"
+          style={{ background: 'rgba(0,0,0,0.6)' }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setConfirmingStop(false);
+          }}
+        >
+          <div
+            className="rounded-2xl px-6 py-5 max-w-[420px] w-full mx-4 flex flex-col gap-3"
+            style={{ background: '#1a1a2e', color: '#fff' }}
+          >
+            <div className="text-[15px] font-extrabold">
+              Stop tracking this task?
+            </div>
+            <div className="text-[12px] font-mono text-white/60 leading-relaxed">
+              Manual stop only — no auto-stop.
+            </div>
+            <div className="flex gap-2 mt-2">
+              <button
+                onClick={() => void performStop()}
+                className="flex-1 bg-[#dc2626] hover:bg-[#b91c1c] border-0 rounded-full px-4 py-[8px] text-[12px] font-extrabold text-white cursor-pointer transition-colors"
+              >
+                Confirm stop
+              </button>
+              <button
+                onClick={() => setConfirmingStop(false)}
+                className="flex-1 bg-white/12 hover:bg-white/20 border-0 rounded-full px-4 py-[8px] text-[12px] font-bold text-white cursor-pointer transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
     <BreakingOutModal
       visible={breakingOut}
@@ -336,22 +414,27 @@ function ControlButton({
   label,
   onClick,
   danger,
+  accent,
   disabled,
 }: {
   icon: string;
   label: string;
   onClick: () => void;
   danger?: boolean;
+  accent?: boolean;
   disabled?: boolean;
 }) {
+  const bg = danger
+    ? '#dc2626'
+    : accent
+      ? '#f59e0b'
+      : 'rgba(255,255,255,0.14)';
   return (
     <button
       onClick={onClick}
       disabled={disabled}
       className="w-[72px] h-[72px] rounded-full border-0 flex flex-col items-center justify-center text-white cursor-pointer transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-      style={{
-        background: danger ? '#dc2626' : 'rgba(255,255,255,0.14)',
-      }}
+      style={{ background: bg }}
       title={label}
       aria-label={label}
     >

@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { useStore } from '@/lib/store';
 import { matchesFilters } from '@/lib/filters';
+import { matchesSearch } from '@/lib/matchers';
 import { ProjectCard } from './ProjectCard';
 import { ListView } from './ListView';
 import type { TaskType } from '@/types';
@@ -43,15 +44,23 @@ export function ListByProjectView() {
   const tasks = useStore((s) => s.tasks);
   const projects = useStore((s) => s.projects);
   const categories = useStore((s) => s.categories);
+  const tags = useStore((s) => s.tags);
   const filters = useStore((s) => s.filters);
+  const searchQuery = useStore((s) => s.searchQuery);
+  const setSearchQuery = useStore((s) => s.setSearchQuery);
   const activeSessions = useStore((s) => s.activeSessions);
 
   const [groupBy, setGroupBy] = useState<GroupBy>('project');
   const [sortBy, setSortBy] = useState<SortBy>('progress');
 
   const filteredTasks = useMemo(
-    () => tasks.filter((t) => matchesFilters(t, filters)),
-    [tasks, filters],
+    () =>
+      tasks.filter(
+        (t) =>
+          matchesFilters(t, filters) &&
+          matchesSearch(t, searchQuery, { projects, tags }),
+      ),
+    [tasks, filters, searchQuery, projects, tags],
   );
 
   // Project IDs that are currently being timed (for the black-card visual rule).
@@ -155,28 +164,44 @@ export function ListByProjectView() {
         showSort
       />
       {buckets.length === 0 ? (
-        <div className="text-center py-10 text-[#aaa] text-sm">
-          No tasks match the current filters.
-        </div>
+        searchQuery.trim() ? (
+          <div className="text-center py-10 text-[#888] text-sm">
+            <div>No tasks match &ldquo;{searchQuery}&rdquo;</div>
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="mt-2 text-[12px] text-[#1a1a2e] underline cursor-pointer bg-transparent border-0"
+            >
+              Clear search
+            </button>
+          </div>
+        ) : (
+          <div className="text-center py-10 text-[#aaa] text-sm">
+            No tasks match the current filters.
+          </div>
+        )
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {buckets.map((b) => (
-            <ProjectCard
-              key={b.key}
-              label={b.label}
-              color={b.color}
-              tasks={b.tasks}
-              isActive={b.isActive}
-              addProjectId={b.addProjectId}
-              statusLabel={
-                groupBy === 'category'
-                  ? 'Category'
-                  : b.key === 'unassigned'
-                    ? 'Unassigned'
-                    : 'Active'
-              }
-            />
-          ))}
+        <div className="grid grid-cols-1 list:grid-cols-2 xl:grid-cols-3 gap-4">
+          {buckets.map((b) => {
+            const mode: 'active' | 'idle' | 'category' | 'unassigned' =
+              b.key === 'unassigned'
+                ? 'unassigned'
+                : groupBy === 'category'
+                  ? 'category'
+                  : b.isActive
+                    ? 'active'
+                    : 'idle';
+            return (
+              <ProjectCard
+                key={b.key}
+                label={b.label}
+                color={b.color}
+                tasks={b.tasks}
+                mode={mode}
+                addProjectId={b.addProjectId}
+              />
+            );
+          })}
         </div>
       )}
     </div>

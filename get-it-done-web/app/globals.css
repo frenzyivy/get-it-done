@@ -2,6 +2,7 @@
 
 @theme inline {
   --font-sans: var(--font-dm-sans), 'Segoe UI', system-ui, sans-serif;
+  --breakpoint-list: 980px;
 }
 
 html, body {

@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { Suspense, useCallback, useMemo, useState } from 'react';
 import { useStore } from '@/lib/store';
 import { useDismissOnOutside } from '@/lib/hooks/useDismissOnOutside';
 import { FilterPicker } from './FilterPicker';
+import { TaskSearchInput } from './TaskSearchInput';
 import type { Filters, SavedView, SavedViewType } from '@/types';
 
 // Note: the saved-views dropdown deliberately lists *all* of the user's saved
@@ -30,6 +31,8 @@ export function FilterBar() {
   const loadView = useStore((s) => s.loadView);
   const renameView = useStore((s) => s.renameView);
   const deleteView = useStore((s) => s.deleteView);
+  const savedViewCounts = useStore((s) => s.savedViewCounts);
+  const fetchSavedViewCounts = useStore((s) => s.fetchSavedViewCounts);
 
   // Spec maps web ViewMode → SavedViewType.view_type. 'kanban' is 'board' in
   // the DB schema (the `saved_views.view_type` CHECK constraint). Schedule
@@ -150,6 +153,11 @@ export function FilterBar() {
             </button>
           ))}
           <FilterPicker />
+          {/* Feature 07 — live-filter search. Suspense satisfies Next's
+              useSearchParams CSR-bailout requirement on prerendered routes. */}
+          <Suspense fallback={null}>
+            <TaskSearchInput />
+          </Suspense>
           {hasActiveFilters && (
             <button
               type="button"
@@ -166,7 +174,13 @@ export function FilterBar() {
           <div ref={dropdownRef} className="relative shrink-0">
             <button
               type="button"
-              onClick={() => setDropdownOpen((v) => !v)}
+              onClick={() => {
+                setDropdownOpen((v) => {
+                  // Closed → open: refresh counts (respects 60s memo).
+                  if (!v) void fetchSavedViewCounts();
+                  return !v;
+                });
+              }}
               className="text-xs px-3 py-[6px] rounded-lg border-[1.5px] border-[#e5e7eb] bg-white text-[#555] cursor-pointer font-medium hover:border-[#1a1a2e] transition-colors inline-flex items-center gap-[6px]"
             >
               ★ Saved views
@@ -187,10 +201,12 @@ export function FilterBar() {
                   )}
                   {savedViews.map((v) => {
                     const renaming = renamingId === v.id;
+                    const counts = savedViewCounts[v.id];
+                    const desc = describeFilters(v);
                     return (
                       <div
                         key={v.id}
-                        className="flex items-center gap-2 px-[6px] py-[5px] rounded-md text-[13px] hover:bg-black/[.03]"
+                        className="flex items-center gap-2 px-[6px] py-[5px] rounded-md text-[13px] hover:bg-[#fdf6e3]"
                       >
                         {renaming ? (
                           <>
@@ -234,12 +250,17 @@ export function FilterBar() {
                                 loadView(v.id);
                                 setDropdownOpen(false);
                               }}
-                              className="flex-1 text-left bg-transparent border-0 cursor-pointer text-[13px] truncate"
+                              className="flex-1 min-w-0 text-left bg-transparent border-0 cursor-pointer p-0"
                             >
-                              <span className="font-semibold">{v.name}</span>{' '}
-                              <span className="text-[10px] font-mono uppercase tracking-wider text-[#9ca3af]">
-                                {v.view_type}
-                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className="font-semibold text-[13px] truncate">
+                                  {v.name}
+                                </span>
+                                <CountPills counts={counts} />
+                              </div>
+                              <div className="text-[10px] font-mono text-[#9ca3af] truncate mt-[1px]">
+                                {desc}
+                              </div>
                             </button>
                             <button
                               type="button"
@@ -334,4 +355,59 @@ export function FilterBar() {
       )}
     </div>
   );
+}
+
+// Feature 06 — three count pills shown on each saved-view row.
+// Todo uses neutral gray (per spec, intentionally diverges from KANBAN_COLS
+// purple so it recedes vs the active states); in-progress and done match the
+// board palette.
+const PILL_COLORS = {
+  todo: '#6b7280',
+  in_progress: '#f59e0b',
+  done: '#10b981',
+} as const;
+
+function CountPills({
+  counts,
+}: {
+  counts: { todo: number; in_progress: number; done: number } | undefined;
+}) {
+  const c = counts ?? { todo: 0, in_progress: 0, done: 0 };
+  return (
+    <span className="ml-auto inline-flex items-center gap-1 shrink-0">
+      <Pill value={c.todo} color={PILL_COLORS.todo} label="To do" />
+      <Pill value={c.in_progress} color={PILL_COLORS.in_progress} label="In progress" />
+      <Pill value={c.done} color={PILL_COLORS.done} label="Done" />
+    </span>
+  );
+}
+
+function Pill({ value, color, label }: { value: number; color: string; label: string }) {
+  return (
+    <span
+      title={`${label}: ${value}`}
+      className="min-w-[22px] h-[22px] px-[6px] rounded-full text-[11px] font-bold flex items-center justify-center"
+      style={{ background: color + '18', color }}
+    >
+      {value}
+    </span>
+  );
+}
+
+// Renders the saved view's filter dimensions as a short mono string, e.g.
+// "board · 2 projects · 1 tag". Only includes dimensions that exist in the
+// current Filters type — `due` from the spec example isn't a real dimension yet.
+function describeFilters(v: SavedView): string {
+  const f = v.filters;
+  const parts: string[] = [v.view_type];
+  const counts: [number, string, string][] = [
+    [f.project_ids?.length ?? 0, 'project', 'projects'],
+    [f.category_ids?.length ?? 0, 'category', 'categories'],
+    [f.tag_ids?.length ?? 0, 'tag', 'tags'],
+    [f.priorities?.length ?? 0, 'priority', 'priorities'],
+  ];
+  for (const [n, s, p] of counts) {
+    if (n > 0) parts.push(`${n} ${n === 1 ? s : p}`);
+  }
+  return parts.join(' · ');
 }

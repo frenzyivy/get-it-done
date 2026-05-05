@@ -19,6 +19,7 @@ import type {
   TrackedSession,
   PlannedBlock,
   FocusMode,
+  ScheduleSubView,
   DriftEvent,
   RecurringTemplate,
   NewRecurringTemplateInput,
@@ -174,7 +175,8 @@ interface Store {
   completeSession: (sessionId: string) => Promise<void>;
   markSessionBroken: (sessionId: string, reason: string) => Promise<void>;
   pauseSession: (sessionId: string) => Promise<void>;
-  autoPauseIdleSessions: (lastActivityMs: number, idleThresholdMs: number) => Promise<void>;
+  startBreak: (sessionId: string) => Promise<void>;
+  endBreak: (sessionId: string) => Promise<void>;
   updateSessionTimes: (
     sessionId: string,
     startedAtISO: string,
@@ -274,6 +276,26 @@ interface Store {
   clearFilter: (dim: keyof Filters, value: string) => void;
   clearAllFilters: () => void;
 
+  // Feature 07 — live-filter search. Combined with `filters` via AND in the
+  // views (BoardView/ListView/PriorityView/Schedule sidebar). Not persisted —
+  // URL `?q=` is the source of truth across reloads.
+  searchQuery: string;
+  setSearchQuery: (q: string) => void;
+
+  // Feature 09 (minimal) — Schedule view sub-tab. Lets the Schedule view
+  // switch between Day, Week, and Month renderings. Week is a placeholder.
+  // `scheduleDayStartMs` is the date the Day sub-view loads — kept here (not
+  // local to ScheduleView) so the Month grid can drill into a specific day.
+  scheduleSubView: ScheduleSubView;
+  setScheduleSubView: (v: ScheduleSubView) => void;
+  scheduleDayStartMs: number;
+  setScheduleDayStart: (d: Date) => void;
+  // One-shot scroll intent: when the Week view drills into Day at a specific
+  // hour, the Day view consumes this on mount/update and clears it back to
+  // null. null = no pending scroll.
+  pendingScrollHour: number | null;
+  setPendingScrollHour: (h: number | null) => void;
+
   // Calendar view (Phase 3 step 10) — per-weekday hour goals + per-day
   // tracked seconds. `dailyTargets` is one row from `daily_targets`;
   // `secondsByDay` is keyed YYYY-MM-DD in user tz, populated by
@@ -301,6 +323,16 @@ interface Store {
     }[];
   } | null;
   fetchDaySessions: (date: string, force?: boolean) => Promise<void>;
+
+  // Feature 15 — server-aggregated planned/tracked totals for the Schedule
+  // Day header. tracked_seconds excludes the running session, which the
+  // client adds live via useLiveTimers().
+  dayStats: {
+    date: string;
+    planned_seconds: number;
+    tracked_seconds: number;
+  } | null;
+  fetchDayStats: (date: string, force?: boolean) => Promise<void>;
 
   // When You Work heatmap (Phase 4 step 12) — 7x24 matrix from
   // /api/sessions/by-hour-of-week, keyed [day][hour] where day is 0=Sun..6=Sat
@@ -330,6 +362,13 @@ interface Store {
   loadView: (id: string) => void;
   renameView: (id: string, name: string) => Promise<void>;
   deleteView: (id: string) => Promise<void>;
+
+  // Status-count pills shown in the saved-views dropdown (Feature 06).
+  // Map keyed by view_id; refreshed lazily when the dropdown opens, with a
+  // 60s memo invalidated by any task or saved-view mutation.
+  savedViewCounts: Record<string, { todo: number; in_progress: number; done: number }>;
+  savedViewCountsFetchedAt: number | null;
+  fetchSavedViewCounts: () => Promise<void>;
 
   // Insights page state. Payload cached per-range for 60s to keep the
   // range-toggle snappy. `selectedProjectId` / `selectedTagId` are client-only
@@ -510,6 +549,33 @@ export const useStore = create<Store>()(
     set({ daySessions: { date: json.date, sessions: json.sessions } });
   },
 
+  dayStats: null,
+  fetchDayStats: async (date, force) => {
+    const { userId, dayStats } = get();
+    if (!userId) return;
+    if (!force && dayStats?.date === date) return;
+    const res = await fetch(
+      `/api/sessions/day-stats?date=${encodeURIComponent(date)}`,
+      { credentials: 'include' },
+    );
+    if (!res.ok) {
+      console.error('[store.fetchDayStats]', await res.text());
+      return;
+    }
+    const json = (await res.json()) as {
+      date: string;
+      planned_seconds: number;
+      tracked_seconds: number;
+    };
+    set({
+      dayStats: {
+        date: json.date,
+        planned_seconds: json.planned_seconds,
+        tracked_seconds: json.tracked_seconds,
+      },
+    });
+  },
+
   fetchSessionsByDay: async (from, to) => {
     const { userId } = get();
     if (!userId) return;
@@ -543,6 +609,32 @@ export const useStore = create<Store>()(
     }),
   clearAllFilters: () => set({ filters: { ...EMPTY_FILTERS } }),
 
+  // ---- Feature 07 — live-filter search ------------------------------------
+  searchQuery: '',
+  setSearchQuery: (q) => set({ searchQuery: q }),
+
+  // ---- Feature 09 (minimal) — Schedule sub-tab ----------------------------
+  scheduleSubView: 'day',
+  setScheduleSubView: (v) => {
+    set({ scheduleSubView: v });
+    // Round-trip the choice to user_preferences so it syncs across devices.
+    // updatePrefs no-ops if prefs hasn't loaded yet — local state still
+    // updates and the next change will sync once prefs arrive.
+    void get().updatePrefs({ schedule_default_subview: v });
+  },
+  scheduleDayStartMs: (() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  })(),
+  setScheduleDayStart: (d) => {
+    const local = new Date(d);
+    local.setHours(0, 0, 0, 0);
+    set({ scheduleDayStartMs: local.getTime() });
+  },
+  pendingScrollHour: null,
+  setPendingScrollHour: (h) => set({ pendingScrollHour: h }),
+
   // ---- Saved views --------------------------------------------------------
   savedViews: [],
   fetchSavedViews: async () => {
@@ -568,7 +660,10 @@ export const useStore = create<Store>()(
       return null;
     }
     const json = (await res.json()) as { saved_view: SavedView };
-    set((s) => ({ savedViews: [...s.savedViews, json.saved_view] }));
+    set((s) => ({
+      savedViews: [...s.savedViews, json.saved_view],
+      savedViewCountsFetchedAt: null,
+    }));
     return json.saved_view;
   },
   loadView: (id) => {
@@ -610,6 +705,7 @@ export const useStore = create<Store>()(
     const json = (await res.json()) as { saved_view: SavedView };
     set((s) => ({
       savedViews: s.savedViews.map((v) => (v.id === id ? json.saved_view : v)),
+      savedViewCountsFetchedAt: null,
     }));
   },
   deleteView: async (id) => {
@@ -621,7 +717,46 @@ export const useStore = create<Store>()(
       console.error('[store.deleteView]', await res.text());
       return;
     }
-    set((s) => ({ savedViews: s.savedViews.filter((v) => v.id !== id) }));
+    set((s) => {
+      const { [id]: _removed, ...rest } = s.savedViewCounts;
+      return {
+        savedViews: s.savedViews.filter((v) => v.id !== id),
+        savedViewCounts: rest,
+        savedViewCountsFetchedAt: null,
+      };
+    });
+  },
+
+  // ---- Saved-view status counts (Feature 06) ------------------------------
+  savedViewCounts: {},
+  savedViewCountsFetchedAt: null,
+  fetchSavedViewCounts: async () => {
+    const { userId, savedViewCountsFetchedAt } = get();
+    if (!userId) return;
+    if (
+      savedViewCountsFetchedAt !== null &&
+      Date.now() - savedViewCountsFetchedAt < 60_000
+    ) {
+      return;
+    }
+    const { data, error } = await supabase().rpc('get_saved_view_counts', {
+      p_user_id: userId,
+    });
+    if (error) {
+      console.error('[store.fetchSavedViewCounts]', error);
+      return;
+    }
+    const rows = (data ?? []) as Array<{
+      view_id: string;
+      todo: number;
+      in_progress: number;
+      done: number;
+    }>;
+    const next: Record<string, { todo: number; in_progress: number; done: number }> = {};
+    for (const r of rows) {
+      next[r.view_id] = { todo: r.todo, in_progress: r.in_progress, done: r.done };
+    }
+    set({ savedViewCounts: next, savedViewCountsFetchedAt: Date.now() });
   },
 
   notifications: [],
@@ -759,7 +894,23 @@ export const useStore = create<Store>()(
       .eq('user_id', userId)
       .maybeSingle();
     if (error) throw error;
-    if (data) set({ prefs: data as UserPrefs });
+    if (data) {
+      const prefs = data as UserPrefs;
+      set({ prefs });
+      // Feature 09 — seed scheduleSubView from the server-side default the
+      // first time prefs load this session. We only seed when local state is
+      // still the un-touched default ('day'); if the user (or a rehydrated
+      // localStorage value) already changed sub-tab on this device, the
+      // existing value wins.
+      const persisted = get().scheduleSubView;
+      if (
+        persisted === 'day' &&
+        prefs.schedule_default_subview &&
+        prefs.schedule_default_subview !== 'day'
+      ) {
+        set({ scheduleSubView: prefs.schedule_default_subview });
+      }
+    }
   },
 
   updatePrefs: async (updates) => {
@@ -948,13 +1099,35 @@ export const useStore = create<Store>()(
     const sess = activeSessions.find((s) => s.id === sessionId);
     if (!sess) return;
     const now = new Date();
-    const dur = Math.max(
+    // Feature 05 — fold any in-progress break into break_seconds before
+    // computing the final tracked duration. duration_seconds is always net of
+    // break time so insights/streaks don't need to know about breaks.
+    const liveBreak =
+      sess.is_on_break && sess.last_break_started_at
+        ? Math.max(
+            0,
+            Math.floor(
+              (now.getTime() -
+                new Date(sess.last_break_started_at).getTime()) /
+                1000,
+            ),
+          )
+        : 0;
+    const breakTotal = (sess.break_seconds ?? 0) + liveBreak;
+    const elapsed = Math.max(
       0,
       Math.floor((now.getTime() - new Date(sess.started_at).getTime()) / 1000),
     );
+    const dur = Math.max(0, elapsed - breakTotal);
     const { error } = await supabase()
       .from('tracked_sessions')
-      .update({ ended_at: now.toISOString(), duration_seconds: dur })
+      .update({
+        ended_at: now.toISOString(),
+        duration_seconds: dur,
+        break_seconds: breakTotal,
+        is_on_break: false,
+        last_break_started_at: null,
+      })
       .eq('id', sessionId);
     if (error) throw error;
     set((s) => ({
@@ -979,10 +1152,23 @@ export const useStore = create<Store>()(
     const sess = activeSessions.find((s) => s.id === sessionId);
     if (!sess) return;
     const now = new Date();
-    const dur = Math.max(
+    const liveBreak =
+      sess.is_on_break && sess.last_break_started_at
+        ? Math.max(
+            0,
+            Math.floor(
+              (now.getTime() -
+                new Date(sess.last_break_started_at).getTime()) /
+                1000,
+            ),
+          )
+        : 0;
+    const breakTotal = (sess.break_seconds ?? 0) + liveBreak;
+    const elapsed = Math.max(
       0,
       Math.floor((now.getTime() - new Date(sess.started_at).getTime()) / 1000),
     );
+    const dur = Math.max(0, elapsed - breakTotal);
     const { error } = await supabase()
       .from('tracked_sessions')
       .update({
@@ -990,6 +1176,9 @@ export const useStore = create<Store>()(
         duration_seconds: dur,
         broken: true,
         broken_reason: reason,
+        break_seconds: breakTotal,
+        is_on_break: false,
+        last_break_started_at: null,
       })
       .eq('id', sessionId);
     if (error) throw error;
@@ -1001,23 +1190,40 @@ export const useStore = create<Store>()(
     await get().fetchProfileV2();
   },
 
-  // Pause is modeled as stop + was_paused=true; resume creates a new row. This
-  // keeps time-during-pause out of totals cleanly and avoids a schema change.
+  // Legacy: Pause is modeled as stop + was_paused=true; resume creates a new
+  // row. Replaced in the UI by Break (Feature 05) but kept callable so other
+  // call sites don't break. Now also nets out break time before writing.
   pauseSession: async (sessionId) => {
     const { activeSessions } = get();
     const sess = activeSessions.find((s) => s.id === sessionId);
     if (!sess) return;
     const now = new Date();
-    const dur = Math.max(
+    const liveBreak =
+      sess.is_on_break && sess.last_break_started_at
+        ? Math.max(
+            0,
+            Math.floor(
+              (now.getTime() -
+                new Date(sess.last_break_started_at).getTime()) /
+                1000,
+            ),
+          )
+        : 0;
+    const breakTotal = (sess.break_seconds ?? 0) + liveBreak;
+    const elapsed = Math.max(
       0,
       Math.floor((now.getTime() - new Date(sess.started_at).getTime()) / 1000),
     );
+    const dur = Math.max(0, elapsed - breakTotal);
     const { error } = await supabase()
       .from('tracked_sessions')
       .update({
         ended_at: now.toISOString(),
         duration_seconds: dur,
         was_paused: true,
+        break_seconds: breakTotal,
+        is_on_break: false,
+        last_break_started_at: null,
       })
       .eq('id', sessionId);
     if (error) throw error;
@@ -1027,53 +1233,86 @@ export const useStore = create<Store>()(
     }));
   },
 
-  // Activity-based idle auto-pause. For each running session, if the user has
-  // been idle longer than `idleThresholdMs`, end the session at the last-
-  // activity timestamp (not "now") so untracked idle time isn't attributed to
-  // work. Sessions younger than the threshold are untouched.
-  autoPauseIdleSessions: async (lastActivityMs, idleThresholdMs) => {
+  // Feature 05 — Break button. Within a single session row, toggle into a
+  // "stepped away" state: tracked seconds freeze, a separate break counter
+  // accrues. Resume folds the live break delta into break_seconds. The session
+  // row stays in activeSessions throughout — only is_on_break flips.
+  //
+  // duration_seconds is also flushed here (net of break_seconds so far) so the
+  // periodic 30s persist + a refresh mid-break show the correct frozen value.
+  startBreak: async (sessionId) => {
     const { activeSessions } = get();
-    if (activeSessions.length === 0) return;
-    const idleFor = Date.now() - lastActivityMs;
-    if (idleFor < idleThresholdMs) return;
-    const endAtMs = lastActivityMs;
-    const endAtISO = new Date(endAtMs).toISOString();
-    const db = supabase();
-    const toPause = activeSessions.filter((s) => {
-      const start = new Date(s.started_at).getTime();
-      return endAtMs > start;
-    });
-    if (toPause.length === 0) return;
-    await Promise.all(
-      toPause.map((s) => {
-        const dur = Math.max(
-          0,
-          Math.floor((endAtMs - new Date(s.started_at).getTime()) / 1000),
-        );
-        return db
-          .from('tracked_sessions')
-          .update({ ended_at: endAtISO, duration_seconds: dur, was_paused: true })
-          .eq('id', s.id);
-      }),
+    const sess = activeSessions.find((s) => s.id === sessionId);
+    if (!sess) return;
+    if (sess.is_on_break) return;
+    const now = new Date();
+    const elapsed = Math.max(
+      0,
+      Math.floor((now.getTime() - new Date(sess.started_at).getTime()) / 1000),
     );
-    const pausedIds = new Set(toPause.map((s) => s.id));
+    const dur = Math.max(0, elapsed - (sess.break_seconds ?? 0));
+    const updates = {
+      is_on_break: true,
+      last_break_started_at: now.toISOString(),
+      duration_seconds: dur,
+    };
     set((s) => ({
-      activeSessions: s.activeSessions.filter((x) => !pausedIds.has(x.id)),
-      focusSessionId:
-        s.focusSessionId && pausedIds.has(s.focusSessionId) ? null : s.focusSessionId,
+      activeSessions: s.activeSessions.map((x) =>
+        x.id === sessionId ? { ...x, ...updates } : x,
+      ),
     }));
+    const { error } = await supabase()
+      .from('tracked_sessions')
+      .update(updates)
+      .eq('id', sessionId);
+    if (error) throw error;
+  },
+
+  endBreak: async (sessionId) => {
+    const { activeSessions } = get();
+    const sess = activeSessions.find((s) => s.id === sessionId);
+    if (!sess) return;
+    if (!sess.is_on_break || !sess.last_break_started_at) return;
+    const now = new Date();
+    const delta = Math.max(
+      0,
+      Math.floor(
+        (now.getTime() - new Date(sess.last_break_started_at).getTime()) / 1000,
+      ),
+    );
+    const newBreakTotal = (sess.break_seconds ?? 0) + delta;
+    const updates = {
+      is_on_break: false,
+      last_break_started_at: null,
+      break_seconds: newBreakTotal,
+    };
+    set((s) => ({
+      activeSessions: s.activeSessions.map((x) =>
+        x.id === sessionId ? { ...x, ...updates } : x,
+      ),
+    }));
+    const { error } = await supabase()
+      .from('tracked_sessions')
+      .update(updates)
+      .eq('id', sessionId);
+    if (error) throw error;
   },
 
   // Manually edit a session's start/end window. Used by the Timeline "Adjust"
   // popover so users can trim an abandoned timer that painted too much time.
-  // Recomputes duration_seconds from the new window.
+  // Recomputes duration_seconds from the new window, net of any break_seconds
+  // already accrued on the row.
   updateSessionTimes: async (sessionId, startedAtISO, endedAtISO) => {
     const startMs = new Date(startedAtISO).getTime();
     const endMs = new Date(endedAtISO).getTime();
     if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
       throw new Error('Invalid session window');
     }
-    const dur = Math.floor((endMs - startMs) / 1000);
+    const window = Math.floor((endMs - startMs) / 1000);
+    const { activeSessions } = get();
+    const sess = activeSessions.find((s) => s.id === sessionId);
+    const breakTotal = sess?.break_seconds ?? 0;
+    const dur = Math.max(0, window - breakTotal);
     const { error } = await supabase()
       .from('tracked_sessions')
       .update({
@@ -1101,16 +1340,30 @@ export const useStore = create<Store>()(
   },
 
   // Called every 30s by useLiveTimer so a browser crash doesn't lose progress.
+  // duration_seconds is always written net-of-break: closed break_seconds plus
+  // (if currently on break) the live break delta is subtracted from elapsed.
   persistActiveSessionDurations: async () => {
     const { activeSessions } = get();
     if (activeSessions.length === 0) return;
     const db = supabase();
+    const now = Date.now();
     await Promise.all(
       activeSessions.map((s) => {
-        const dur = Math.max(
+        const elapsed = Math.max(
           0,
-          Math.floor((Date.now() - new Date(s.started_at).getTime()) / 1000),
+          Math.floor((now - new Date(s.started_at).getTime()) / 1000),
         );
+        const liveBreak =
+          s.is_on_break && s.last_break_started_at
+            ? Math.max(
+                0,
+                Math.floor(
+                  (now - new Date(s.last_break_started_at).getTime()) / 1000,
+                ),
+              )
+            : 0;
+        const breakTotal = (s.break_seconds ?? 0) + liveBreak;
+        const dur = Math.max(0, elapsed - breakTotal);
         return db
           .from('tracked_sessions')
           .update({ duration_seconds: dur })
@@ -1390,7 +1643,10 @@ export const useStore = create<Store>()(
       category_ids: categoryIds,
       project_ids: projectIds,
     };
-    set((s) => ({ tasks: [...s.tasks, newTask] }));
+    set((s) => ({
+      tasks: [...s.tasks, newTask],
+      savedViewCountsFetchedAt: null,
+    }));
     return task.id;
   },
 
@@ -1427,6 +1683,7 @@ export const useStore = create<Store>()(
       set({ tasks: prev });
       throw error;
     }
+    set({ savedViewCountsFetchedAt: null });
   },
 
   deleteTask: async (id) => {
@@ -1437,6 +1694,7 @@ export const useStore = create<Store>()(
       set({ tasks: prev });
       throw error;
     }
+    set({ savedViewCountsFetchedAt: null });
   },
 
   moveTask: async (id, status) => {
@@ -1974,7 +2232,16 @@ export const useStore = create<Store>()(
           removeItem: () => {},
         };
       }),
-      partialize: (state) => ({ filters: state.filters }) as Partial<Store>,
+      partialize: (state) =>
+        ({
+          filters: state.filters,
+          // Feature 09 — Schedule sub-tab + selected day persist across
+          // reloads in localStorage. Server-side default for sub-tab lives
+          // on user_preferences.schedule_default_subview and seeds via
+          // fetchPrefs on first load.
+          scheduleSubView: state.scheduleSubView,
+          scheduleDayStartMs: state.scheduleDayStartMs,
+        }) as Partial<Store>,
     },
   ),
 );

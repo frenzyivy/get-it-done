@@ -5,7 +5,27 @@ import { useStore } from '@/lib/store';
 import { useDismissOnOutside } from '@/lib/hooks/useDismissOnOutside';
 import { parseQuickAdd } from '@/lib/quickAddParser';
 import { fmtShort } from '@/lib/utils';
-import type { Priority } from '@/types';
+import type { Priority, ProjectType } from '@/types';
+import { QuickAddProjectMenu } from './QuickAddProjectMenu';
+import { QuickAddActions, buildQuickActions } from './QuickAddActions';
+
+// Returns the partial @-token from the last @ before `caret` up to `caret`,
+// or null if the caret isn't inside an @-mention. Token must contain only
+// word/dash chars (matches the parser's /@([\w\-]+)/ grammar).
+function getActiveMention(text: string, caret: number): string | null {
+  for (let i = caret - 1; i >= 0; i--) {
+    const ch = text[i];
+    if (ch === '@') {
+      // Must be at start of input or preceded by whitespace.
+      if (i === 0 || /\s/.test(text[i - 1])) {
+        return text.slice(i + 1, caret);
+      }
+      return null;
+    }
+    if (!/[\w\-]/.test(ch)) return null;
+  }
+  return null;
+}
 
 // Phase 5 step 15 — Quick-add command bar (Ctrl/Cmd+K). Frosted dark-glass
 // card centered horizontally, anchored to the upper third of the viewport.
@@ -27,6 +47,11 @@ export function QuickAddBar() {
   const filters = useStore((s) => s.filters);
   const projects = useStore((s) => s.projects);
   const categories = useStore((s) => s.categories);
+  const tasks = useStore((s) => s.tasks);
+  const view = useStore((s) => s.view);
+  const setView = useStore((s) => s.setView);
+  const savedViews = useStore((s) => s.savedViews);
+  const loadView = useStore((s) => s.loadView);
   const addTask = useStore((s) => s.addTask);
   const addSubtask = useStore((s) => s.addSubtask);
   const addProject = useStore((s) => s.addProject);
@@ -35,7 +60,38 @@ export function QuickAddBar() {
 
   const [input, setInput] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [caret, setCaret] = useState(0);
+  const [projectSel, setProjectSel] = useState(0);
+  const [actionsSel, setActionsSel] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
+
+  // Active @-mention token (substring after '@' up to the caret), or null.
+  const mention = useMemo(() => getActiveMention(input, caret), [input, caret]);
+
+  // Visible project list — must mirror QuickAddProjectMenu's filtering exactly
+  // so keyboard selection lines up with what's rendered.
+  const visibleProjects = useMemo(() => {
+    if (mention === null) return [];
+    const q = mention.toLowerCase();
+    const sorted = [...projects].sort((a, b) => a.name.localeCompare(b.name));
+    return q ? sorted.filter((p) => p.name.toLowerCase().startsWith(q)) : sorted;
+  }, [projects, mention]);
+
+  const showProjectMenu = mention !== null;
+  const showActionsMenu = !showProjectMenu && input.trim() === '';
+
+  // Keep selection indexes in bounds when the underlying list changes.
+  useEffect(() => {
+    if (showProjectMenu && projectSel >= visibleProjects.length) {
+      setProjectSel(0);
+    }
+  }, [showProjectMenu, projectSel, visibleProjects.length]);
+  useEffect(() => {
+    if (!showProjectMenu) setProjectSel(0);
+  }, [showProjectMenu, mention]);
+  useEffect(() => {
+    if (!showActionsMenu) setActionsSel(0);
+  }, [showActionsMenu]);
 
   // Global Ctrl/Cmd+K to toggle. Bound on every authenticated route via
   // app/layout.tsx; no-op on login / unauthenticated routes where userId
@@ -63,10 +119,41 @@ export function QuickAddBar() {
       // Reset typing state on close so the next open starts fresh.
       setInput('');
       setSubmitting(false);
+      setCaret(0);
+      setProjectSel(0);
+      setActionsSel(0);
     }
   }
 
   const dismissRef = useDismissOnOutside<HTMLDivElement>(open, closeQuickAdd);
+
+  // Replace the active "@partial" with "@CanonicalName " (trailing space)
+  // and place the caret right after. The parser will exact-match the full
+  // canonical name on submit.
+  const pickProject = useCallback(
+    (project: ProjectType) => {
+      if (mention === null) return;
+      // Find the @ that started the active token (caret - mention.length - 1).
+      const atIdx = caret - mention.length - 1;
+      if (atIdx < 0 || input[atIdx] !== '@') return;
+      const before = input.slice(0, atIdx);
+      const after = input.slice(caret);
+      const insert = `@${project.name} `;
+      const next = before + insert + after;
+      const nextCaret = atIdx + insert.length;
+      setInput(next);
+      // Apply caret after React paints. queueMicrotask isn't enough here
+      // because the input value updates on the next render.
+      requestAnimationFrame(() => {
+        const el = inputRef.current;
+        if (!el) return;
+        el.focus();
+        el.setSelectionRange(nextCaret, nextCaret);
+        setCaret(nextCaret);
+      });
+    },
+    [caret, input, mention],
+  );
 
   const parsed = useMemo(
     () => parseQuickAdd(input, projects, categories, filters),
@@ -143,6 +230,7 @@ export function QuickAddBar() {
         } else {
           // Sticky after Enter — clear input but keep the bar open + focused.
           setInput('');
+          setCaret(0);
           queueMicrotask(() => inputRef.current?.focus());
         }
       } finally {
@@ -212,8 +300,119 @@ export function QuickAddBar() {
           ref={inputRef}
           autoFocus
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => {
+            setInput(e.target.value);
+            setCaret(e.target.selectionStart ?? e.target.value.length);
+          }}
+          onSelect={(e) => {
+            const el = e.currentTarget;
+            setCaret(el.selectionStart ?? 0);
+          }}
+          onClick={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
+          onKeyUp={(e) => {
+            // Catch caret moves from arrow keys / home / end that don't
+            // fire onSelect in every browser.
+            setCaret(e.currentTarget.selectionStart ?? 0);
+          }}
           onKeyDown={(e) => {
+            if (showProjectMenu) {
+              if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (visibleProjects.length > 0) {
+                  setProjectSel((i) => (i + 1) % visibleProjects.length);
+                }
+                return;
+              }
+              if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (visibleProjects.length > 0) {
+                  setProjectSel(
+                    (i) => (i - 1 + visibleProjects.length) % visibleProjects.length,
+                  );
+                }
+                return;
+              }
+              if (e.key === 'Enter' || e.key === 'Tab') {
+                if (visibleProjects.length > 0) {
+                  e.preventDefault();
+                  pickProject(visibleProjects[projectSel] ?? visibleProjects[0]);
+                  return;
+                }
+                // No matches — fall through (Enter submits, Tab does default).
+              }
+              if (e.key === 'Escape') {
+                // Close the dropdown only by stripping the @-token back to
+                // before the @. Easiest: insert a space to break the mention.
+                e.preventDefault();
+                const atIdx = caret - (mention?.length ?? 0) - 1;
+                if (atIdx >= 0 && input[atIdx] === '@') {
+                  const before = input.slice(0, atIdx);
+                  const after = input.slice(caret);
+                  const next = before + after;
+                  setInput(next);
+                  requestAnimationFrame(() => {
+                    const el = inputRef.current;
+                    if (!el) return;
+                    el.focus();
+                    el.setSelectionRange(atIdx, atIdx);
+                    setCaret(atIdx);
+                  });
+                }
+                return;
+              }
+              // Other keys fall through to default input behavior.
+            }
+            if (showActionsMenu) {
+              const actions = buildQuickActions({
+                view,
+                setView,
+                savedViews,
+                loadView,
+                focusInput: () => inputRef.current?.focus(),
+              });
+              const enabled = actions.filter((a) => !a.disabled);
+              if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (enabled.length > 0) {
+                  // Map current selection within full list, then advance to
+                  // the next enabled action.
+                  const order = actions
+                    .map((a, idx) => ({ a, idx }))
+                    .filter(({ a }) => !a.disabled)
+                    .map(({ idx }) => idx);
+                  const cur = order.indexOf(actionsSel);
+                  const nextIdx = order[(cur + 1) % order.length];
+                  setActionsSel(nextIdx);
+                }
+                return;
+              }
+              if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (enabled.length > 0) {
+                  const order = actions
+                    .map((a, idx) => ({ a, idx }))
+                    .filter(({ a }) => !a.disabled)
+                    .map(({ idx }) => idx);
+                  const cur = order.indexOf(actionsSel);
+                  const prevIdx = order[(cur - 1 + order.length) % order.length];
+                  setActionsSel(prevIdx);
+                }
+                return;
+              }
+              if (e.key === 'Enter') {
+                const action = actions[actionsSel];
+                if (action && !action.disabled) {
+                  e.preventDefault();
+                  action.run();
+                  // Add task = focus stays here. Other actions close palette.
+                  if (action.id !== 'add-task') {
+                    closeQuickAdd();
+                  }
+                  return;
+                }
+              }
+              // Esc falls through to the default close-palette branch below.
+            }
             if (e.key === 'Enter') {
               e.preventDefault();
               void submit(e.shiftKey);
@@ -265,7 +464,7 @@ export function QuickAddBar() {
           {parsed.unresolvedCategoryTokens.map((tok) => (
             <Chip key={`uc:${tok}`} kind="?CATEGORY" label={`#${tok}`} unresolved />
           ))}
-          {input.trim() === '' && (
+          {input.trim() === '' && !showActionsMenu && (
             <span className="text-[10px] font-mono text-white/30">
               live preview — type to see what is detected
             </span>
@@ -280,6 +479,35 @@ export function QuickAddBar() {
             </span>{' '}
             “{parsed.title}”
           </div>
+        )}
+
+        {showProjectMenu && (
+          <QuickAddProjectMenu
+            query={mention ?? ''}
+            projects={projects}
+            tasks={tasks}
+            selectedIndex={projectSel}
+            onSelectedIndexChange={setProjectSel}
+            onPick={pickProject}
+          />
+        )}
+
+        {showActionsMenu && (
+          <QuickAddActions
+            selectedIndex={actionsSel}
+            onSelectedIndexChange={setActionsSel}
+            onActivate={(action) => {
+              action.run();
+              if (action.id !== 'add-task') {
+                closeQuickAdd();
+              }
+            }}
+            view={view}
+            setView={setView}
+            savedViews={savedViews}
+            loadView={loadView}
+            focusInput={() => inputRef.current?.focus()}
+          />
         )}
       </div>
     </>

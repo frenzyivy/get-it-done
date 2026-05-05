@@ -140,6 +140,13 @@ export interface NotificationType {
   created_at: string;
 }
 
+export type ScheduleSnapMode = 'hour' | '15min' | 'free';
+
+// Feature 09 — Schedule view sub-tabs. The Schedule top-level view now hosts
+// three sub-views; this ticket ships the shell + Day, with Week/Month stubbed
+// out for Features 10 & 11.
+export type ScheduleSubView = 'day' | 'week' | 'month';
+
 export interface UserPrefs {
   user_id: string;
   timezone: string;
@@ -159,6 +166,10 @@ export interface UserPrefs {
   // Weekly work-hours goal used by the Timeline footer's Goal pie card.
   // Week is Sun → Sat in local time; goal is the target for the whole week.
   weekly_work_goal_hours: number;
+  // Feature 01 — Schedule Day view drag/resize snap mode.
+  schedule_snap_mode: ScheduleSnapMode;
+  // Feature 09 — last-chosen Schedule sub-tab, server-persisted for cross-device sync.
+  schedule_default_subview: ScheduleSubView;
 }
 
 export interface AutomationRule {
@@ -217,6 +228,13 @@ export interface TrackedSession {
   broken: boolean;
   broken_reason: string | null;
   planned_duration_seconds: number | null;
+  // Feature 05 — Break button (migration 0031). break_seconds is closed-break
+  // total; is_on_break + last_break_started_at describe the currently-running
+  // break (if any). duration_seconds is always net-of-break by the time it's
+  // written, so reports/streaks need no special-casing.
+  break_seconds: number;
+  is_on_break: boolean;
+  last_break_started_at: string | null;
 }
 
 // Focus Lock — UI labels map 1:1 to focus modes. Parity with mobile.

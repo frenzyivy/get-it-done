@@ -5,32 +5,32 @@ import { TaskCard } from './TaskCard';
 import { AddTaskForm } from './AddTaskForm';
 import type { TaskType } from '@/types';
 
+type ColumnMode = 'active' | 'idle' | 'category' | 'unassigned';
+
 interface Props {
   // Card label (project name OR category name OR "Unassigned").
   label: string;
   // Hex color for the dot/accent. Empty string = neutral grey.
   color: string;
   tasks: TaskType[];
-  // Active timer landed on a task in this group → black "current focus" card.
-  isActive: boolean;
+  // Project mode drives both the pill (ACTIVE/IDLE/CATEGORY/UNASSIGNED) and
+  // the dark-navy "current focus" card background. 'active' = a running
+  // tracked session belongs to a task in this project.
+  mode: ColumnMode;
   // The "+ Add task to [label]" button auto-attaches to this project. null
   // for category cards or the Unassigned bucket — those don't pre-attach.
   addProjectId: string | null;
-  // Status row label override ("Active" for projects; "Category" / etc.).
-  statusLabel?: string;
 }
 
-// Spec §6 — Project-grouped square card. Compact variant (<4 tasks) hides
-// the stats row and uses a shorter min-height.
 export function ProjectCard({
   label,
   color,
   tasks,
-  isActive,
+  mode,
   addProjectId,
-  statusLabel = 'Active',
 }: Props) {
-  const compact = tasks.length < 4;
+  const isActive = mode === 'active';
+  const tasksShort = tasks.length < 4;
 
   // Stats from the already-loaded task list — no extra fetches.
   const tracked = tasks.reduce((sum, t) => sum + t.total_time_seconds, 0);
@@ -41,7 +41,7 @@ export function ProjectCard({
   const cardBg = isActive ? '#1a1a2e' : 'rgba(255,255,255,0.7)';
   const ink = isActive ? '#fff' : '#1a1a2e';
   const sub = isActive ? 'rgba(255,255,255,0.55)' : '#888';
-  const dotColor = color || (isActive ? 'rgba(255,255,255,0.7)' : '#9ca3af');
+  const divider = isActive ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.06)';
 
   return (
     <div
@@ -55,43 +55,19 @@ export function ProjectCard({
           ? '0 8px 30px rgba(0,0,0,0.18)'
           : '0 1px 4px rgba(0,0,0,0.04)',
         backdropFilter: isActive ? undefined : 'blur(8px)',
-        minHeight: compact ? 180 : 280,
+        minHeight: tasksShort ? 200 : 280,
       }}
     >
-      {/* Status row — dot + label + count */}
-      <div className="flex items-center gap-2">
-        <span
-          className="w-[8px] h-[8px] rounded-full shrink-0"
-          style={{ background: dotColor }}
-        />
-        <span
-          className="text-[10px] font-mono uppercase tracking-[1px] font-bold"
-          style={{ color: sub }}
-        >
-          {statusLabel}
-        </span>
-        <span
-          className="ml-auto text-[10px] font-mono"
-          style={{ color: sub }}
-        >
-          {tasks.length} task{tasks.length === 1 ? '' : 's'}
-        </span>
-      </div>
+      <Pill mode={mode} color={color} sub={sub} />
 
-      {/* Project / category name */}
       <div className="font-extrabold text-[16px]" style={{ color: ink }}>
         {label}
       </div>
 
-      {/* Progress bar + % */}
       <div>
         <div
-          className="rounded-full h-[6px] overflow-hidden"
-          style={{
-            background: isActive
-              ? 'rgba(255,255,255,0.12)'
-              : 'rgba(0,0,0,0.06)',
-          }}
+          className="rounded-full h-[4px] overflow-hidden"
+          style={{ background: divider }}
         >
           <div
             className="h-full rounded-full transition-all duration-300"
@@ -101,22 +77,29 @@ export function ProjectCard({
             }}
           />
         </div>
-        <div className="text-[11px] mt-[3px]" style={{ color: sub }}>
-          {progress}% complete
+        <div className="text-[11px] mt-[4px]" style={{ color: sub }}>
+          {progress}% complete · {tasks.length} task{tasks.length === 1 ? '' : 's'}
         </div>
       </div>
 
-      {/* Stats — hidden on compact (<4 tasks) variant per spec §6 */}
-      {!compact && (
-        <div className="grid grid-cols-3 gap-2 text-center">
-          <Stat label="Tracked" value={fmtShort(tracked)} ink={ink} sub={sub} />
-          <Stat label="Open" value={String(open)} ink={ink} sub={sub} />
-          <Stat label="Done" value={String(done)} ink={ink} sub={sub} />
-        </div>
-      )}
+      <div className="grid grid-cols-3 text-center">
+        <Stat label="Tracked" value={fmtShort(tracked)} ink={ink} sub={sub} />
+        <Stat
+          label="Open"
+          value={String(open)}
+          ink={ink}
+          sub={sub}
+          divider={divider}
+        />
+        <Stat
+          label="Done"
+          value={String(done)}
+          ink={ink}
+          sub={sub}
+          divider={divider}
+        />
+      </div>
 
-      {/* Inline scrollable task list. Capped at ~360px so the card stays
-          square-ish; longer lists scroll inside. */}
       {tasks.length > 0 && (
         <div className="flex flex-col gap-[6px] max-h-[360px] overflow-y-auto pr-1">
           {tasks.map((t) => (
@@ -146,19 +129,65 @@ export function ProjectCard({
   );
 }
 
+function Pill({
+  mode,
+  color,
+  sub,
+}: {
+  mode: ColumnMode;
+  color: string;
+  sub: string;
+}) {
+  const dotColor =
+    mode === 'active'
+      ? '#f59e0b'
+      : mode === 'category'
+        ? color || '#9ca3af'
+        : '#9ca3af';
+  const label =
+    mode === 'active'
+      ? 'ACTIVE'
+      : mode === 'idle'
+        ? 'IDLE'
+        : mode === 'category'
+          ? 'CATEGORY'
+          : 'UNASSIGNED';
+
+  return (
+    <div className="flex items-center gap-2">
+      <span
+        className="w-[8px] h-[8px] rounded-full shrink-0"
+        style={{ background: dotColor }}
+      />
+      <span
+        className="text-[10px] font-mono uppercase tracking-[1px] font-bold"
+        style={{ color: sub }}
+      >
+        {label}
+      </span>
+    </div>
+  );
+}
+
 function Stat({
   label,
   value,
   ink,
   sub,
+  divider,
 }: {
   label: string;
   value: string;
   ink: string;
   sub: string;
+  divider?: string;
 }) {
   return (
-    <div>
+    <div
+      style={
+        divider ? { borderLeft: `1px solid ${divider}` } : undefined
+      }
+    >
       <div
         className="text-[10px] font-mono uppercase tracking-wider"
         style={{ color: sub }}
