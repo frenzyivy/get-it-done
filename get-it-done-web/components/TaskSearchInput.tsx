@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useStore } from '@/lib/store';
 
@@ -25,10 +25,17 @@ export function TaskSearchInput({ compact = false, placeholder }: Props) {
 
   const searchQuery = useStore((s) => s.searchQuery);
   const setSearchQuery = useStore((s) => s.setSearchQuery);
+  const setSearchAnchorRect = useStore((s) => s.setSearchAnchorRect);
+  const setSearchDropdownOpen = useStore((s) => s.setSearchDropdownOpen);
 
   // Local input value — drives the visible <input> and updates immediately.
   // `searchQuery` (store) is what filters; we sync local -> store on debounce.
   const [value, setValue] = useState(searchQuery);
+
+  // Wrapper ref — its bounding rect anchors the SearchResultsDropdown
+  // (rendered inside each view's DndContext, see SearchResultsDropdown.tsx).
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const [focused, setFocused] = useState(false);
 
   // On mount, seed from URL `?q=` if the store doesn't already match. This
   // makes deep links work and keeps Board/Schedule in sync when navigating.
@@ -75,6 +82,49 @@ export function TaskSearchInput({ compact = false, placeholder }: Props) {
     return () => clearTimeout(handle);
   }, [value, searchQuery, setSearchQuery, router, pathname, searchParams]);
 
+  // Publish the input's bounding rect to the store so each view's rendered
+  // <SearchResultsDropdown> can position itself underneath. We re-measure on
+  // focus, on value change (the clear-× button changes width), and on window
+  // resize.
+  const publishAnchor = useCallback(() => {
+    const el = wrapperRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setSearchAnchorRect({
+      top: r.bottom,
+      left: r.left,
+      width: r.width,
+    });
+  }, [setSearchAnchorRect]);
+
+  useEffect(() => {
+    if (!focused) return;
+    publishAnchor();
+    window.addEventListener('resize', publishAnchor);
+    window.addEventListener('scroll', publishAnchor, true);
+    return () => {
+      window.removeEventListener('resize', publishAnchor);
+      window.removeEventListener('scroll', publishAnchor, true);
+    };
+  }, [focused, publishAnchor]);
+
+  // Dropdown is open while the input is focused AND the query is non-empty.
+  // Blur is debounced (~150ms) so a click on a dropdown row lands first.
+  const hasQuery = value.trim().length > 0;
+  const shouldOpen = focused && hasQuery;
+  useEffect(() => {
+    setSearchDropdownOpen(shouldOpen);
+  }, [shouldOpen, setSearchDropdownOpen]);
+
+  // Cleanup on unmount — never leave a stale "open" flag behind if the input
+  // gets unmounted while focused (e.g. view switch from Today to Calendar).
+  useEffect(() => {
+    return () => {
+      setSearchDropdownOpen(false);
+      setSearchAnchorRect(null);
+    };
+  }, [setSearchDropdownOpen, setSearchAnchorRect]);
+
   const clear = () => {
     setValue('');
   };
@@ -83,6 +133,7 @@ export function TaskSearchInput({ compact = false, placeholder }: Props) {
 
   return (
     <div
+      ref={wrapperRef}
       className={`relative inline-flex items-center ${widthClass} h-[30px] rounded-full border-[1.5px] border-[#e5e7eb] bg-white pl-7 pr-2 transition-colors focus-within:border-[#1a1a2e]`}
     >
       <span
@@ -95,6 +146,20 @@ export function TaskSearchInput({ compact = false, placeholder }: Props) {
         type="search"
         value={value}
         onChange={(e) => setValue(e.target.value)}
+        onFocus={() => setFocused(true)}
+        // Delay blur — gives a row click / drag inside the dropdown time to
+        // fire before we tear down the open state. The dropdown's own
+        // onMouseDown also calls preventDefault to keep focus here, but
+        // Safari can still drop focus on certain drag starts.
+        onBlur={() => {
+          setTimeout(() => setFocused(false), 180);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') {
+            setFocused(false);
+            (e.target as HTMLInputElement).blur();
+          }
+        }}
         placeholder={placeholder ?? 'Search tasks...'}
         aria-label="Search tasks"
         className="flex-1 min-w-0 bg-transparent border-0 outline-none text-[12px] text-[#1a1a2e] placeholder:text-[#9ca3af]"

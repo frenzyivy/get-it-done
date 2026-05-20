@@ -114,10 +114,12 @@ export function SubtaskItem({
           {subtask.title}
         </span>
       )}
-      {/* Spec § Task time displays — clean monospace number, no pill. */}
-      {subtask.total_time_seconds > 0 && (
+      {/* Spec § Task time displays — clean monospace number, no pill.
+          Sums legacy total_time_seconds + tracked_sessions rollup so live-timer
+          time shows up alongside the old Pomodoro RPC time. */}
+      {subtask.total_time_seconds + subtask.tracked_total_seconds > 0 && (
         <span className="text-[11px] font-mono tabular-nums text-[#666] whitespace-nowrap shrink-0">
-          {fmtShort(subtask.total_time_seconds)}
+          {fmtShort(subtask.total_time_seconds + subtask.tracked_total_seconds)}
         </span>
       )}
       <button

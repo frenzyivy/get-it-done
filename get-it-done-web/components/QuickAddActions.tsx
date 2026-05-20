@@ -25,6 +25,8 @@ export interface QuickAddActionsProps {
 
 // Order matches the dashboard's view switcher (Dashboard.tsx:120-126).
 const VIEW_CYCLE: ViewMode[] = [
+  'today',
+  'matrix',
   'kanban',
   'list',
   'priority',
@@ -34,6 +36,8 @@ const VIEW_CYCLE: ViewMode[] = [
 ];
 
 const VIEW_LABELS: Record<ViewMode, string> = {
+  today: 'Today',
+  matrix: 'Matrix',
   kanban: 'Board',
   list: 'List',
   priority: 'Priority',

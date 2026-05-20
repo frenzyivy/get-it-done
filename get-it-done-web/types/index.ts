@@ -1,12 +1,25 @@
 export type Status = 'todo' | 'in_progress' | 'done';
 export type Priority = 'low' | 'medium' | 'high' | 'urgent';
 
+// Phase 3 — Eisenhower matrix quadrants. Stored on tasks.matrix_quadrant
+// (migration 0033). 'unsorted' is the explicit default for tasks that
+// haven't been triaged yet; they live in the Unsorted tray.
+export type MatrixQuadrant =
+  | 'do_first'
+  | 'schedule'
+  | 'delegate'
+  | 'drop'
+  | 'unsorted';
+
 export interface SubtaskType {
   id: string;
   task_id: string;
   title: string;
   is_done: boolean;
   total_time_seconds: number;
+  // Derived client-side from closed tracked_sessions for this subtask. See the
+  // note on TaskType.tracked_total_seconds for why this exists.
+  tracked_total_seconds: number;
   sort_order: number;
 }
 
@@ -37,12 +50,30 @@ export interface TaskType {
   priority: Priority;
   due_date: string | null;
   total_time_seconds: number;
+  // Derived client-side from the sum of closed tracked_sessions for this task.
+  // Legacy `total_time_seconds` only tracks the old Pomodoro RPC path; the
+  // current live-timer flow writes to tracked_sessions without rolling up.
+  // Add the two together to get the true "time invested" figure.
+  tracked_total_seconds: number;
   estimated_seconds: number | null;
   sort_order: number;
   allow_alarms: boolean;
   // "Today's 5" planning date — the date the user intends to work on this
   // task. Distinct from `due_date` which is the external deadline.
   planned_for_date: string | null;
+  // Phase 2 — execution order within the day's set. 1-based; NULL means the
+  // task is assigned to the day but hasn't been positioned yet. The Today
+  // view sorts ASC by this column; the legacy TodayFiveDrawer continues to
+  // sort by `sort_order` so the two surfaces don't fight over namespacing.
+  today_sequence: number | null;
+  // Phase 3 — Eisenhower-matrix quadrant. Independent of status and
+  // today_for_date: a task can be in DO_FIRST AND on Today AND in_progress
+  // simultaneously. Defaults to 'unsorted' on the DB side.
+  matrix_quadrant: MatrixQuadrant;
+  // Phase 1.2 — last time real progress happened on this task (new session,
+  // subtask toggle, or task edit). Drives the "not recording time" amber
+  // warning state on in-progress tasks. NULL = no progress recorded yet.
+  last_progress_at: string | null;
   tag_ids: string[];
   category_ids: string[];
   project_ids: string[];
@@ -74,6 +105,13 @@ export interface ProjectType {
   name: string;
   color: string;
   status: ProjectStatus;
+  // Phase 1.4 — server-computed flag from v_project_staleness. TRUE when an
+  // active project hasn't seen tracked time for more than user_preferences
+  // .stale_project_days. Only `active` projects can be stale.
+  is_stale?: boolean;
+  // Last time any task in this project had a tracked session end. NULL means
+  // no tracked activity recorded yet (used as a tooltip on the stale banner).
+  last_activity_at?: string | null;
 }
 
 export type ViewMode =
@@ -82,7 +120,12 @@ export type ViewMode =
   | 'schedule'
   | 'timeline'
   | 'priority'
-  | 'calendar';
+  | 'calendar'
+  // Phase 2 — sequenced daily execution view; new default landing for new
+  // users. Existing users keep whatever the persisted store has.
+  | 'today'
+  // Phase 3 — Eisenhower 2x2 strategic-triage view. Used weekly, not daily.
+  | 'matrix';
 
 // Calendar view (Phase 3 step 10) — per-weekday hour goals.
 // Mirrors the daily_targets table from migration 0024. The DB enum allows
@@ -100,6 +143,19 @@ export interface DailyTargets {
   sat: number;
   sun: number;
   preset_name: CalendarPreset | null;
+}
+
+// Phase 6 — per-week goal storage. One row per (user, week_start) per
+// migration 0033. week_start is a Sunday in ISO YYYY-MM-DD; working_days
+// defaults to 5. daily_goal is derived: goal_hours / working_days.
+export interface WeeklyGoal {
+  id: string;
+  user_id: string;
+  week_start: string; // YYYY-MM-DD, Sunday
+  goal_hours: number; // 0..168, NUMERIC(4,1)
+  working_days: number; // 1..7, default 5
+  created_at?: string;
+  updated_at?: string;
 }
 
 // Filter dimensions for the Board / List filter bar (Change #4).
@@ -170,6 +226,29 @@ export interface UserPrefs {
   schedule_snap_mode: ScheduleSnapMode;
   // Feature 09 — last-chosen Schedule sub-tab, server-persisted for cross-device sync.
   schedule_default_subview: ScheduleSubView;
+  // Phase 1 upgrade — new toggles from migration 0033.
+  edit_resets_status: boolean;
+  edit_reset_fields: string[];
+  warning_threshold_min: number;
+  stale_project_days: number;
+  hide_completed_default: boolean;
+  // Phase 5 upgrade — gap-detection toggles from migration 0034.
+  show_break_blocks: boolean;
+  break_min_gap_minutes: number;
+  // Phase 8 — sticky timer pill from migration 0035.
+  sticky_timer_enabled: boolean;
+  sticky_timer_position:
+    | 'bottom_right'
+    | 'bottom_left'
+    | 'top_right'
+    | 'top_left';
+  // Phase 9 — presence detection prefs already exist on user_preferences
+  // from migration 0033; mirroring them on the client type here so the
+  // Settings panel can read/write without a `as Record<string, unknown>`.
+  presence_detection_enabled: boolean;
+  presence_break_after_min: number;
+  presence_stop_after_min: number;
+  presence_method: 'mouse_keyboard' | 'webcam' | 'mobile_motion';
 }
 
 export interface AutomationRule {
@@ -235,7 +314,30 @@ export interface TrackedSession {
   break_seconds: number;
   is_on_break: boolean;
   last_break_started_at: string | null;
+  // Phase 4 — Timeline editing / breaks. From migration 0033.
+  // block_type discriminates user-labelled break rows from regular tracked
+  // work; break_label is the user-confirmed label ("lunch" / "walk" / etc.);
+  // break_auto_detected is true the moment a gap-detection heuristic
+  // suggested it and false once the user touches it. manually_entered is the
+  // audit flag the Honest Score (Phase 6) reads to discount edited data
+  // against the auto-tracked baseline.
+  block_type: 'tracked' | 'break';
+  break_label: string | null;
+  break_auto_detected: boolean;
+  manually_entered: boolean;
+  note: string | null;
 }
+
+// Phase 4 — labels offered by the break label picker. These match the demo's
+// six quick buttons. 'other' is a catch-all for custom labels stored as the
+// trimmed user string.
+export type BreakLabel =
+  | 'lunch'
+  | 'walk'
+  | 'meeting'
+  | 'think'
+  | 'distract'
+  | 'other';
 
 // Focus Lock — UI labels map 1:1 to focus modes. Parity with mobile.
 export type FocusLockLevel = 'just_track' | 'focus' | 'no_mercy';

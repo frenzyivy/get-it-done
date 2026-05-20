@@ -33,6 +33,13 @@ interface Bucket {
   addProjectId: string | null;
   isActive: boolean;
   tasks: TaskType[];
+  // Phase 1.4 — surfaced from v_project_staleness so the project card can
+  // render the stale-project banner. False / null for category buckets.
+  // We pass last_activity_at (an ISO string) instead of a "days ago" number
+  // so the day count is computed at render time inside the banner without
+  // calling Date.now() during a useMemo (React 19 purity rule).
+  isStale?: boolean;
+  lastActivityAt?: string | null;
 }
 
 // Spec §6 — List by project view. Renders project-grouped square cards
@@ -53,14 +60,18 @@ export function ListByProjectView() {
   const [groupBy, setGroupBy] = useState<GroupBy>('project');
   const [sortBy, setSortBy] = useState<SortBy>('progress');
 
+  const showCompleted = useStore((s) => s.showCompleted);
+
   const filteredTasks = useMemo(
     () =>
       tasks.filter(
         (t) =>
           matchesFilters(t, filters) &&
-          matchesSearch(t, searchQuery, { projects, tags }),
+          matchesSearch(t, searchQuery, { projects, tags }) &&
+          // Phase 1.1 — hide completed by default.
+          (showCompleted || t.effective_status !== 'done'),
       ),
-    [tasks, filters, searchQuery, projects, tags],
+    [tasks, filters, searchQuery, projects, tags, showCompleted],
   );
 
   // Project IDs that are currently being timed (for the black-card visual rule).
@@ -91,6 +102,8 @@ export function ListByProjectView() {
           addProjectId: p.id,
           isActive: activeProjectIds.has(p.id),
           tasks: pTasks,
+          isStale: p.is_stale ?? false,
+          lastActivityAt: p.last_activity_at ?? null,
         });
       }
       for (const t of filteredTasks) {
@@ -199,6 +212,8 @@ export function ListByProjectView() {
                 tasks={b.tasks}
                 mode={mode}
                 addProjectId={b.addProjectId}
+                isStale={b.isStale}
+                lastActivityAt={b.lastActivityAt}
               />
             );
           })}
@@ -268,8 +283,14 @@ function compareBuckets(a: Bucket, b: Bucket, sortBy: SortBy): number {
       return progressOf(b.tasks) - progressOf(a.tasks);
     }
     case 'total_time': {
-      const aT = a.tasks.reduce((s, t) => s + t.total_time_seconds, 0);
-      const bT = b.tasks.reduce((s, t) => s + t.total_time_seconds, 0);
+      const aT = a.tasks.reduce(
+        (s, t) => s + t.total_time_seconds + t.tracked_total_seconds,
+        0,
+      );
+      const bT = b.tasks.reduce(
+        (s, t) => s + t.total_time_seconds + t.tracked_total_seconds,
+        0,
+      );
       return bT - aT;
     }
     case 'recent': {

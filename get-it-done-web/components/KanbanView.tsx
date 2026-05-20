@@ -33,8 +33,11 @@ export function KanbanView() {
     // "Logged time" = closed task time, OR any subtask with closed time,
     // OR a currently-running tracked_session on the task or a subtask.
     if (newStatus === 'in_progress') {
-      const taskHasTime = task.total_time_seconds > 0;
-      const subtaskHasTime = task.subtasks.some((s) => s.total_time_seconds > 0);
+      const taskHasTime =
+        task.total_time_seconds > 0 || task.tracked_total_seconds > 0;
+      const subtaskHasTime = task.subtasks.some(
+        (s) => s.total_time_seconds > 0 || s.tracked_total_seconds > 0,
+      );
       const liveSession = activeSessions.some((s) => s.task_id === taskId);
       if (!taskHasTime && !subtaskHasTime && !liveSession) {
         showToast(

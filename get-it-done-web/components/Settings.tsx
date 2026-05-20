@@ -308,6 +308,287 @@ export function Settings() {
 
         <section className="bg-white rounded-[14px] p-5 mb-4 shadow-[0_1px_4px_rgba(0,0,0,0.06),0_0_0_1px_rgba(0,0,0,0.04)]">
           <h2 className="text-[13px] font-extrabold text-[#1a1a2e] uppercase tracking-[0.5px] mb-2">
+            Workflow
+          </h2>
+          {/* Phase 1.1 — hide-completed default */}
+          <Toggle
+            label="Hide completed tasks by default"
+            desc="Done tasks disappear from active boards. The toggle in the dashboard header reveals them dimmed with strikethrough."
+            checked={prefs.hide_completed_default ?? true}
+            onChange={(v) => updatePrefs({ hide_completed_default: v })}
+          />
+          {/* Phase 1.2 — warning threshold */}
+          <div className="flex items-center justify-between py-3 border-t border-[#eee]">
+            <div className="flex-1">
+              <div className="text-[14px] font-semibold text-[#1a1a2e]">
+                Warn when no time logged
+              </div>
+              <div className="text-[12px] text-[#888] mt-1">
+                Show an amber warning on in-progress tasks with no recent
+                tracked time. Re-checked once a minute.
+              </div>
+            </div>
+            <div className="flex items-center gap-1 shrink-0 mt-1">
+              <input
+                type="number"
+                min={1}
+                max={120}
+                value={prefs.warning_threshold_min ?? 20}
+                onChange={(e) => {
+                  const n = Math.min(120, Math.max(1, Number(e.target.value) || 20));
+                  updatePrefs({ warning_threshold_min: n });
+                }}
+                className="border-[1.5px] border-[#e5e7eb] rounded-lg px-2 py-1 text-[13px] w-[68px] text-right"
+              />
+              <span className="text-[12px] text-[#666]">min</span>
+            </div>
+          </div>
+          {/* Phase 1.3 — edits reset status */}
+          <Toggle
+            label="Reset task to To Do when edited"
+            desc="If you rename or re-estimate an in-progress task, drop it back to To Do with an undo toast. Priority, due date, and tag changes never trigger reset."
+            checked={prefs.edit_resets_status ?? true}
+            onChange={(v) => updatePrefs({ edit_resets_status: v })}
+          />
+          {/* Phase 1.4 — stale-project threshold */}
+          <div className="flex items-center justify-between py-3 border-t border-[#eee]">
+            <div className="flex-1">
+              <div className="text-[14px] font-semibold text-[#1a1a2e]">
+                Flag stale projects after
+              </div>
+              <div className="text-[12px] text-[#888] mt-1">
+                Active projects with no tracked time for this many days show
+                an amber nudge banner on the List view with Drop / Schedule /
+                Archive shortcuts.
+              </div>
+            </div>
+            <div className="flex items-center gap-1 shrink-0 mt-1">
+              <input
+                type="number"
+                min={1}
+                max={90}
+                value={prefs.stale_project_days ?? 7}
+                onChange={(e) => {
+                  const n = Math.min(90, Math.max(1, Number(e.target.value) || 7));
+                  updatePrefs({ stale_project_days: n });
+                }}
+                className="border-[1.5px] border-[#e5e7eb] rounded-lg px-2 py-1 text-[13px] w-[68px] text-right"
+              />
+              <span className="text-[12px] text-[#666]">days</span>
+            </div>
+          </div>
+          {/* Phase 5 — break block detection */}
+          <Toggle
+            label="Show break blocks on Timeline"
+            desc="Auto-detect unrecorded gaps between tracked sessions and paint them as striped blocks. Click to label them."
+            checked={prefs.show_break_blocks ?? true}
+            onChange={(v) => updatePrefs({ show_break_blocks: v })}
+          />
+          <div className="flex items-center justify-between py-3 border-t border-[#eee]">
+            <div className="flex-1">
+              <div className="text-[14px] font-semibold text-[#1a1a2e]">
+                Ignore gaps shorter than
+              </div>
+              <div className="text-[12px] text-[#888] mt-1">
+                Transition time between sessions doesn&apos;t count. Gaps
+                below this threshold are hidden from the Timeline.
+              </div>
+            </div>
+            <div className="flex items-center gap-1 shrink-0 mt-1">
+              <input
+                type="number"
+                min={1}
+                max={30}
+                value={prefs.break_min_gap_minutes ?? 5}
+                onChange={(e) => {
+                  const n = Math.min(30, Math.max(1, Number(e.target.value) || 5));
+                  updatePrefs({ break_min_gap_minutes: n });
+                }}
+                className="border-[1.5px] border-[#e5e7eb] rounded-lg px-2 py-1 text-[13px] w-[68px] text-right"
+              />
+              <span className="text-[12px] text-[#666]">min</span>
+            </div>
+          </div>
+        </section>
+
+        {/* Phase 8 — Sticky timer */}
+        <section className="bg-white rounded-[14px] p-5 mb-4 shadow-[0_1px_4px_rgba(0,0,0,0.06),0_0_0_1px_rgba(0,0,0,0.04)]">
+          <h2 className="text-[13px] font-extrabold text-[#1a1a2e] uppercase tracking-[0.5px] mb-2">
+            Sticky timer
+          </h2>
+          <Toggle
+            label="Show floating timer pill"
+            desc="Pinned to a corner of the screen when a session is live. Visible on Insights, Settings, and any other page. Suppresses on the Dashboard where the Now Tracking banner already lives at the top."
+            checked={prefs.sticky_timer_enabled ?? true}
+            onChange={(v) => updatePrefs({ sticky_timer_enabled: v })}
+          />
+          {prefs.sticky_timer_enabled !== false && (
+            <div className="flex items-center justify-between py-3 border-t border-[#eee]">
+              <div className="flex-1">
+                <div className="text-[14px] font-semibold text-[#1a1a2e]">
+                  Pill position
+                </div>
+                <div className="text-[12px] text-[#888] mt-1">
+                  Where the timer pill anchors on screen.
+                </div>
+              </div>
+              <select
+                value={prefs.sticky_timer_position ?? 'bottom_right'}
+                onChange={(e) =>
+                  updatePrefs({
+                    sticky_timer_position: e.target.value as
+                      | 'bottom_right'
+                      | 'bottom_left'
+                      | 'top_right'
+                      | 'top_left',
+                  })
+                }
+                className="border-[1.5px] border-[#e5e7eb] rounded-lg px-2 py-1 text-[13px] shrink-0 mt-1"
+              >
+                <option value="bottom_right">Bottom right</option>
+                <option value="bottom_left">Bottom left</option>
+                <option value="top_right">Top right</option>
+                <option value="top_left">Top left</option>
+              </select>
+            </div>
+          )}
+          <div className="pt-3 border-t border-[#eee] mt-3 text-[12px] text-[#9ca3af] italic leading-[1.5]">
+            For a true always-on-top widget (visible even when another app is
+            focused), wrap Get-it-done with{' '}
+            <a
+              href="https://tauri.app"
+              target="_blank"
+              rel="noreferrer noopener"
+              className="text-[#1a1a2e] underline"
+            >
+              Tauri
+            </a>{' '}
+            or Electron — the in-app pill only shows while the browser tab is
+            focused.
+          </div>
+        </section>
+
+        {/* Phase 9 — Presence detection */}
+        <section className="bg-white rounded-[14px] p-5 mb-4 shadow-[0_1px_4px_rgba(0,0,0,0.06),0_0_0_1px_rgba(0,0,0,0.04)]">
+          <h2 className="text-[13px] font-extrabold text-[#1a1a2e] uppercase tracking-[0.5px] mb-2">
+            Presence detection
+          </h2>
+          <Toggle
+            label="Auto-detect when I'm away"
+            desc="If you stop interacting with the app, pause the timer as a break. If you stay away longer, stop the timer entirely. Off by default."
+            checked={prefs.presence_detection_enabled ?? false}
+            onChange={(v) => updatePrefs({ presence_detection_enabled: v })}
+          />
+          {prefs.presence_detection_enabled && (
+            <>
+              <div
+                className="mt-3 mb-3 p-3 rounded-lg text-[12px] leading-[1.5]"
+                style={{
+                  background: '#f0fdf4',
+                  border: '1px solid #bbf7d0',
+                  color: '#166534',
+                }}
+              >
+                <b>Privacy:</b> Detection happens entirely on this device. No
+                camera frames, screen content, or audio are stored or
+                transmitted. Only timestamps of &quot;active&quot; /
+                &quot;absent&quot; events are kept locally. Switch this off
+                any time — derived state is deletable.
+              </div>
+
+              <div className="flex items-center justify-between py-3 border-t border-[#eee]">
+                <div className="flex-1">
+                  <div className="text-[14px] font-semibold text-[#1a1a2e]">
+                    Detection method
+                  </div>
+                  <div className="text-[12px] text-[#888] mt-1">
+                    How to tell whether you&apos;re at your desk.
+                  </div>
+                </div>
+                <select
+                  value={prefs.presence_method ?? 'mouse_keyboard'}
+                  onChange={(e) =>
+                    updatePrefs({
+                      presence_method: e.target.value as
+                        | 'mouse_keyboard'
+                        | 'webcam'
+                        | 'mobile_motion',
+                    })
+                  }
+                  className="border-[1.5px] border-[#e5e7eb] rounded-lg px-2 py-1 text-[13px] shrink-0 mt-1"
+                >
+                  <option value="mouse_keyboard">
+                    Mouse + keyboard (web)
+                  </option>
+                  <option value="webcam">
+                    Webcam (on-device face detection)
+                  </option>
+                  <option value="mobile_motion">
+                    Mobile motion (Expo app only)
+                  </option>
+                </select>
+              </div>
+              <div className="flex items-center justify-between py-3 border-t border-[#eee]">
+                <div className="flex-1">
+                  <div className="text-[14px] font-semibold text-[#1a1a2e]">
+                    Mark as break after
+                  </div>
+                  <div className="text-[12px] text-[#888] mt-1">
+                    Inactivity threshold to split the session and start a
+                    break automatically.
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 shrink-0 mt-1">
+                  <input
+                    type="number"
+                    min={1}
+                    max={60}
+                    value={prefs.presence_break_after_min ?? 5}
+                    onChange={(e) => {
+                      const n = Math.min(
+                        60,
+                        Math.max(1, Number(e.target.value) || 5),
+                      );
+                      updatePrefs({ presence_break_after_min: n });
+                    }}
+                    className="border-[1.5px] border-[#e5e7eb] rounded-lg px-2 py-1 text-[13px] w-[68px] text-right"
+                  />
+                  <span className="text-[12px] text-[#666]">min</span>
+                </div>
+              </div>
+              <div className="flex items-center justify-between py-3 border-t border-[#eee]">
+                <div className="flex-1">
+                  <div className="text-[14px] font-semibold text-[#1a1a2e]">
+                    Auto-stop after
+                  </div>
+                  <div className="text-[12px] text-[#888] mt-1">
+                    Longer inactivity ends the timer completely.
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 shrink-0 mt-1">
+                  <input
+                    type="number"
+                    min={1}
+                    max={240}
+                    value={prefs.presence_stop_after_min ?? 20}
+                    onChange={(e) => {
+                      const n = Math.min(
+                        240,
+                        Math.max(1, Number(e.target.value) || 20),
+                      );
+                      updatePrefs({ presence_stop_after_min: n });
+                    }}
+                    className="border-[1.5px] border-[#e5e7eb] rounded-lg px-2 py-1 text-[13px] w-[68px] text-right"
+                  />
+                  <span className="text-[12px] text-[#666]">min</span>
+                </div>
+              </div>
+            </>
+          )}
+        </section>
+
+        <section className="bg-white rounded-[14px] p-5 mb-4 shadow-[0_1px_4px_rgba(0,0,0,0.06),0_0_0_1px_rgba(0,0,0,0.04)]">
+          <h2 className="text-[13px] font-extrabold text-[#1a1a2e] uppercase tracking-[0.5px] mb-2">
             Recurring templates
           </h2>
           <RecurringTemplatesManager />

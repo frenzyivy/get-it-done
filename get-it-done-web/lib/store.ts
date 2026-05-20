@@ -12,6 +12,8 @@ import type {
   ViewMode,
   NewTaskInput,
   Status,
+  MatrixQuadrant,
+  WeeklyGoal,
   NotificationType,
   UserPrefs,
   AutomationRule,
@@ -38,6 +40,20 @@ const EMPTY_FILTERS: Filters = {
   priorities: [],
 };
 
+// Phase 4 — bag of optional metadata for retroactive session edits / adds.
+// Every field is optional so the existing call sites that pass only positional
+// args keep working; the modal opts in for break_type / labels / notes.
+export interface SessionEditOpts {
+  blockType?: 'tracked' | 'break';
+  breakLabel?: string | null;
+  breakAutoDetected?: boolean;
+  note?: string | null;
+  // manually_entered is always written TRUE on edit / add — that's the whole
+  // point of the audit flag — but exposing the option lets a future caller
+  // (e.g. a presence-detection auto-break in Phase 9) write FALSE.
+  manuallyEntered?: boolean;
+}
+
 interface TaskRow {
   id: string;
   user_id: string;
@@ -52,11 +68,31 @@ interface TaskRow {
   sort_order: number;
   allow_alarms: boolean | null;
   planned_for_date: string | null;
-  subtasks: SubtaskType[] | null;
+  today_sequence: number | null;
+  matrix_quadrant: MatrixQuadrant | null;
+  last_progress_at: string | null;
+  subtasks: SubtaskRow[] | null;
   task_tags: { tag_id: string }[] | null;
   task_categories: { category_id: string }[] | null;
   task_projects: { project_id: string }[] | null;
   time_sessions: TimeSession[] | null;
+  // Tracked sessions rolled up for the "time invested" chip. Open sessions
+  // (ended_at NULL) are filtered out in rowToTask — they contribute live via
+  // activeSessions / useLiveTimers, so including them would double-count.
+  tracked_sessions: {
+    subtask_id: string | null;
+    duration_seconds: number | null;
+    ended_at: string | null;
+  }[] | null;
+}
+
+interface SubtaskRow {
+  id: string;
+  task_id: string;
+  title: string;
+  is_done: boolean;
+  total_time_seconds: number;
+  sort_order: number;
 }
 
 /**
@@ -82,9 +118,46 @@ function deriveEffectiveStatus(
 }
 
 function rowToTask(row: TaskRow, effectiveStatus: Status): TaskType {
+  // Roll up closed tracked_sessions per subtask and for the task overall.
+  // Open sessions (ended_at NULL) are excluded by the query — they contribute
+  // live via useLiveTimers.
+  const tracked = row.tracked_sessions ?? [];
+  let trackedTotalForTask = 0;
+  let latestSessionEndMs = 0;
+  const subtaskTrackedSums = new Map<string, number>();
+  for (const s of tracked) {
+    // Skip open sessions — useLiveTimers already shows them live and adding
+    // duration_seconds (often null or stale) here would double-count.
+    if (s.ended_at === null) continue;
+    const d = s.duration_seconds ?? 0;
+    if (s.subtask_id) {
+      subtaskTrackedSums.set(s.subtask_id, (subtaskTrackedSums.get(s.subtask_id) ?? 0) + d);
+    }
+    // Sum task-level total over ALL closed sessions on the task (task-level
+    // and subtask-level), so the chip reflects every second logged on the card.
+    trackedTotalForTask += d;
+    const endMs = new Date(s.ended_at).getTime();
+    if (Number.isFinite(endMs) && endMs > latestSessionEndMs) {
+      latestSessionEndMs = endMs;
+    }
+  }
+  // Fallback for `last_progress_at`: stopSession didn't always stamp the column
+  // historically, so old tasks have a stale value. Treat the most recent
+  // tracked_session ended_at as a floor so the "no time logged in Xm" warning
+  // reflects real activity.
+  const rowProgressMs = row.last_progress_at
+    ? new Date(row.last_progress_at).getTime()
+    : 0;
+  const lastProgressMs = Math.max(rowProgressMs, latestSessionEndMs);
+  const lastProgressAt =
+    lastProgressMs > 0 ? new Date(lastProgressMs).toISOString() : row.last_progress_at ?? null;
   const subtasks = (row.subtasks ?? [])
     .slice()
-    .sort((a, b) => a.sort_order - b.sort_order);
+    .sort((a, b) => a.sort_order - b.sort_order)
+    .map((s) => ({
+      ...s,
+      tracked_total_seconds: subtaskTrackedSums.get(s.id) ?? 0,
+    }));
   return {
     id: row.id,
     user_id: row.user_id,
@@ -96,10 +169,14 @@ function rowToTask(row: TaskRow, effectiveStatus: Status): TaskType {
     priority: row.priority,
     due_date: row.due_date,
     total_time_seconds: row.total_time_seconds,
+    tracked_total_seconds: trackedTotalForTask,
     estimated_seconds: row.estimated_seconds ?? null,
     sort_order: row.sort_order,
     allow_alarms: row.allow_alarms ?? false,
     planned_for_date: row.planned_for_date ?? null,
+    today_sequence: row.today_sequence ?? null,
+    matrix_quadrant: (row.matrix_quadrant ?? 'unsorted') as MatrixQuadrant,
+    last_progress_at: lastProgressAt,
     tag_ids: (row.task_tags ?? []).map((t) => t.tag_id),
     category_ids: (row.task_categories ?? []).map((c) => c.category_id),
     project_ids: (row.task_projects ?? []).map((p) => p.project_id),
@@ -164,6 +241,18 @@ interface Store {
   setPlannedForDateBulk: (
     updates: { id: string; planned_for_date: string | null }[],
   ) => Promise<void>;
+  // Phase 2 — Today view drag-to-reorder. Rewrites today_sequence on every
+  // task in the given list to 1..N. Date scopes the write so the user isn't
+  // accidentally reordering a different day's set.
+  reorderToday: (date: string, orderedTaskIds: string[]) => Promise<void>;
+  // Phase 2 — append a task to a day's sequence. Sets planned_for_date and
+  // assigns the next available today_sequence number for that date.
+  addTaskToToday: (taskId: string, date: string) => Promise<void>;
+  // Phase 3 — move a task into a Matrix quadrant. Independent of status and
+  // today_for_date; a task can be in DO_FIRST and on Today and in_progress
+  // simultaneously. Thin wrapper over updateTask with the optimistic update
+  // and PATCH wired in one place.
+  setMatrixQuadrant: (taskId: string, quadrant: MatrixQuadrant) => Promise<void>;
   fetchActiveSessions: () => Promise<void>;
   setActiveColumn: (col: Status) => void;
   startTrackingTask: (
@@ -181,6 +270,20 @@ interface Store {
     sessionId: string,
     startedAtISO: string,
     endedAtISO: string,
+    // Phase 4 — optional metadata bag. Anything passed here is written
+    // alongside the times. manually_entered is forced to true for any
+    // explicit call because by definition the user is retroactively editing.
+    opts?: SessionEditOpts,
+  ) => Promise<void>;
+  // Manually log a session after the fact — used by the Timeline date nav so
+  // past days can be backfilled with time that was forgotten / not tracked.
+  // Phase 4 — accepts the same opts bag so the same modal can create breaks
+  // and notes in one call instead of insert-then-patch.
+  addSession: (
+    taskId: string | null,
+    startedAtISO: string,
+    endedAtISO: string,
+    opts?: SessionEditOpts,
   ) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
   stopSession: (sessionId: string) => Promise<void>;
@@ -257,10 +360,26 @@ interface Store {
 
   // Transient toast (Change #1 bounce-back, plus any future ephemeral
   // feedback). `id` increments per toast so an auto-dismiss timer can detect
-  // whether a newer toast superseded it.
-  toast: { message: string; id: number } | null;
+  // whether a newer toast superseded it. The optional `action` lets a toast
+  // carry an inline button (e.g. "Undo") that the Toast component renders.
+  toast: {
+    message: string;
+    id: number;
+    action?: { kind: 'edit_reset_undo'; taskId: string; previousStatus: Status };
+  } | null;
   showToast: (message: string) => void;
   dismissToast: (id?: number) => void;
+
+  // Phase 1.3 — edit-resets-status helpers.
+  showResetUndoToast: (taskId: string, previousStatus: Status) => void;
+  undoEditReset: (taskId: string, previousStatus: Status) => Promise<void>;
+
+  // Phase 1.1 — Hide-completed default-on toggle, per-view multi-tracked.
+  // Persisted via the same zustand persist slice as filters. Reads
+  // user_preferences.hide_completed_default as the initial value the first
+  // time prefs load.
+  showCompleted: boolean;
+  setShowCompleted: (v: boolean) => void;
 
   // Quick-add command bar (Phase 5 step 15) — global open state. Ctrl/Cmd+K
   // toggles; Esc / outside-click / submit close. Component owns the input
@@ -281,6 +400,17 @@ interface Store {
   // URL `?q=` is the source of truth across reloads.
   searchQuery: string;
   setSearchQuery: (q: string) => void;
+
+  // Feature 07 delta — drag-from-results. The dropdown panel is rendered
+  // inside each view's DndContext (not inside TaskSearchInput) because
+  // @dnd-kit cannot drag across context boundaries. We publish the input's
+  // bounding rect here so the views can position the panel underneath it.
+  // `searchDropdownOpen` is the explicit open flag — true when the input is
+  // focused AND query is non-empty.
+  searchAnchorRect: { top: number; left: number; width: number } | null;
+  setSearchAnchorRect: (r: { top: number; left: number; width: number } | null) => void;
+  searchDropdownOpen: boolean;
+  setSearchDropdownOpen: (open: boolean) => void;
 
   // Feature 09 (minimal) — Schedule view sub-tab. Lets the Schedule view
   // switch between Day, Week, and Month renderings. Week is a placeholder.
@@ -306,6 +436,23 @@ interface Store {
   secondsByDay: Record<string, number>;
   secondsByDayRange: { from: string; to: string } | null;
   fetchSessionsByDay: (from: string, to: string) => Promise<void>;
+
+  // Phase 6 — per-week goal storage. weeklyGoals is keyed by week_start
+  // (YYYY-MM-DD Sunday). Loaded lazily by the Calendar / This Week panel; the
+  // resolver `getEffectiveWeeklyGoal` falls back to the most recent past
+  // week's goal, then to user_preferences.weekly_work_goal_hours, then 40h.
+  weeklyGoals: Record<string, WeeklyGoal>;
+  // ISO range we've already fetched, so panel pagination doesn't re-fetch.
+  weeklyGoalsFetchedRange: { from: string; to: string } | null;
+  fetchWeeklyGoals: (fromWeekStart: string, toWeekStart: string) => Promise<void>;
+  // Upsert a week's goal. Pass goal_hours and working_days; the row is
+  // identified by (user_id, week_start) per the UNIQUE constraint in
+  // migration 0033. Returns the upserted row.
+  setWeeklyGoal: (
+    weekStart: string,
+    goalHours: number,
+    workingDays: number,
+  ) => Promise<WeeklyGoal | null>;
 
   // Schedule view (Phase 6 step 17) — detailed sessions for a single day, used
   // to render the "actual" overlay alongside planned blocks. Key is the
@@ -370,6 +517,24 @@ interface Store {
   savedViewCountsFetchedAt: number | null;
   fetchSavedViewCounts: () => Promise<void>;
 
+  // Phase 7 — Honest Score (yesterday-by-default). Cached per-date to keep
+  // the Insights hero card snappy when the user toggles range.
+  honestScore: {
+    date: string;
+    planned_seconds: number;
+    tracked_seconds: number;
+    on_plan_seconds: number;
+    off_plan_seconds: number;
+    break_seconds: number;
+    manual_seconds: number;
+    honest_score_pct: number;
+    manual_share_pct: number;
+    manual_caveat: boolean;
+  } | null;
+  honestScoreLoading: boolean;
+  honestScoreError: string | null;
+  fetchHonestScore: (date?: string, force?: boolean) => Promise<void>;
+
   // Insights page state. Payload cached per-range for 60s to keep the
   // range-toggle snappy. `selectedProjectId` / `selectedTagId` are client-only
   // drill-down picks; they reset when the payload changes.
@@ -394,7 +559,11 @@ export const useStore = create<Store>()(
   tags: [],
   categories: [],
   projects: [],
-  view: 'kanban',
+  // Phase 2 — Today view is the new default landing. Persisted across
+  // reloads via the zustand persist partialize below, so existing users who
+  // last had Board/List/etc. keep their choice; brand-new browsers start on
+  // Today.
+  view: 'today',
   userId: null,
   loading: false,
 
@@ -417,6 +586,10 @@ export const useStore = create<Store>()(
   quickAddOpen: false,
   openQuickAdd: () => set({ quickAddOpen: true }),
   closeQuickAdd: () => set({ quickAddOpen: false }),
+
+  // ---- Phase 1.1 — hide completed (default: hidden) ----------------------
+  showCompleted: false,
+  setShowCompleted: (v) => set({ showCompleted: v }),
 
   // ---- Calendar (Phase 3 step 10) -----------------------------------------
   dailyTargets: null,
@@ -598,6 +771,75 @@ export const useStore = create<Store>()(
     });
   },
 
+  // ---- Phase 6 — weekly_goals ---------------------------------------------
+  weeklyGoals: {},
+  weeklyGoalsFetchedRange: null,
+  fetchWeeklyGoals: async (fromWeekStart, toWeekStart) => {
+    const { userId } = get();
+    if (!userId) return;
+    // No Next route for this — same pattern as fetchProjects: query Supabase
+    // directly and rely on RLS for tenant scoping.
+    const { data, error } = await supabase()
+      .from('weekly_goals')
+      .select('id, user_id, week_start, goal_hours, working_days, created_at, updated_at')
+      .eq('user_id', userId)
+      .gte('week_start', fromWeekStart)
+      .lte('week_start', toWeekStart);
+    if (error) {
+      console.error('[store.fetchWeeklyGoals]', error.message);
+      return;
+    }
+    const next: Record<string, WeeklyGoal> = { ...get().weeklyGoals };
+    for (const row of (data ?? []) as WeeklyGoal[]) {
+      next[row.week_start] = row;
+    }
+    set({
+      weeklyGoals: next,
+      weeklyGoalsFetchedRange: { from: fromWeekStart, to: toWeekStart },
+    });
+  },
+
+  setWeeklyGoal: async (weekStart, goalHours, workingDays) => {
+    const { userId } = get();
+    if (!userId) return null;
+    // Optimistic local upsert so the panel responds to typing without a
+    // round trip. The .upsert below resolves with the canonical row; we
+    // replace once it lands. onConflict targets the (user_id, week_start)
+    // UNIQUE constraint from migration 0033.
+    const optimistic: WeeklyGoal = {
+      id: get().weeklyGoals[weekStart]?.id ?? 'optimistic-' + weekStart,
+      user_id: userId,
+      week_start: weekStart,
+      goal_hours: goalHours,
+      working_days: workingDays,
+    };
+    set((s) => ({
+      weeklyGoals: { ...s.weeklyGoals, [weekStart]: optimistic },
+    }));
+    const { data, error } = await supabase()
+      .from('weekly_goals')
+      .upsert(
+        {
+          user_id: userId,
+          week_start: weekStart,
+          goal_hours: goalHours,
+          working_days: workingDays,
+        },
+        { onConflict: 'user_id,week_start' },
+      )
+      .select()
+      .single();
+    if (error) {
+      console.error('[store.setWeeklyGoal]', error.message);
+      return null;
+    }
+    const row = data as WeeklyGoal;
+    set((s) => ({
+      weeklyGoals: { ...s.weeklyGoals, [weekStart]: row },
+    }));
+    return row;
+  },
+
   // ---- Filter bar (Change #4) ---------------------------------------------
   filters: { ...EMPTY_FILTERS },
   setFilters: (f) => set({ filters: f }),
@@ -612,6 +854,11 @@ export const useStore = create<Store>()(
   // ---- Feature 07 — live-filter search ------------------------------------
   searchQuery: '',
   setSearchQuery: (q) => set({ searchQuery: q }),
+
+  searchAnchorRect: null,
+  setSearchAnchorRect: (r) => set({ searchAnchorRect: r }),
+  searchDropdownOpen: false,
+  setSearchDropdownOpen: (open) => set({ searchDropdownOpen: open }),
 
   // ---- Feature 09 (minimal) — Schedule sub-tab ----------------------------
   scheduleSubView: 'day',
@@ -669,11 +916,17 @@ export const useStore = create<Store>()(
   loadView: (id) => {
     const view = get().savedViews.find((v) => v.id === id);
     if (!view) return;
-    // saved_views.view_type maps to ViewMode. 'board' → 'kanban', 'list' →
-    // 'list', 'priority' → 'priority' (Phase 3 step 8). 'calendar' is still
-    // reserved for the Phase 3 calendar step; those views apply filters but
-    // don't switch view yet.
-    const mode: ViewMode | null =
+    // Selecting a saved view should never yank the user out of a view that
+    // already supports filters — they expect the chips to apply in place. We
+    // only switch view when the current view doesn't support saved views
+    // (e.g. Today, Matrix, Schedule, Timeline, Calendar) — in that case fall
+    // back to the saved view's stored view_type.
+    const currentView = get().view;
+    const currentSupports =
+      currentView === 'kanban' ||
+      currentView === 'list' ||
+      currentView === 'priority';
+    const fallback: ViewMode | null =
       view.view_type === 'board'
         ? 'kanban'
         : view.view_type === 'list'
@@ -681,6 +934,7 @@ export const useStore = create<Store>()(
           : view.view_type === 'priority'
             ? 'priority'
             : null;
+    const nextView = currentSupports ? null : fallback;
     set({
       filters: {
         project_ids: view.filters.project_ids ?? [],
@@ -688,7 +942,7 @@ export const useStore = create<Store>()(
         tag_ids: view.filters.tag_ids ?? [],
         priorities: view.filters.priorities ?? [],
       },
-      ...(mode ? { view: mode } : {}),
+      ...(nextView ? { view: nextView } : {}),
     });
   },
   renameView: async (id, name) => {
@@ -910,6 +1164,18 @@ export const useStore = create<Store>()(
       ) {
         set({ scheduleSubView: prefs.schedule_default_subview });
       }
+      // Phase 1.1 — first-load seed only. The persisted local value (if any)
+      // wins on subsequent renders; we only seed when the stored value is the
+      // initial-state default (false) AND the user actually prefers default-on.
+      // The "first load" check is approximate; a brand-new browser will pick
+      // up the user's pref on first sign-in.
+      const persistedShowCompleted = get().showCompleted;
+      if (
+        persistedShowCompleted === false &&
+        prefs.hide_completed_default === false
+      ) {
+        set({ showCompleted: true });
+      }
     }
   },
 
@@ -1015,6 +1281,91 @@ export const useStore = create<Store>()(
     }
   },
 
+  // Phase 2 — rewrite today_sequence to 1..N in the given order. The Today
+  // view fires this on every drop. We optimistically renumber locally first so
+  // the row order is stable across the in-flight DB writes.
+  reorderToday: async (date, orderedTaskIds) => {
+    if (orderedTaskIds.length === 0) return;
+    const prev = get().tasks;
+    const seqById = new Map<string, number>(
+      orderedTaskIds.map((id, i) => [id, i + 1]),
+    );
+    set((s) => ({
+      tasks: s.tasks.map((t) =>
+        t.planned_for_date === date && seqById.has(t.id)
+          ? { ...t, today_sequence: seqById.get(t.id) ?? null }
+          : t,
+      ),
+    }));
+    const db = supabase();
+    const results = await Promise.all(
+      orderedTaskIds.map((id, i) =>
+        db
+          .from('tasks')
+          .update({ today_sequence: i + 1 })
+          .eq('id', id),
+      ),
+    );
+    const failed = results.find((r) => r.error);
+    if (failed?.error) {
+      set({ tasks: prev });
+      throw failed.error;
+    }
+  },
+
+  // Phase 3 — move a task to a Matrix quadrant. Optimistic local update +
+  // single-row PATCH. No-op when the quadrant is already current to avoid a
+  // pointless write when DnD ends on the same drop zone the drag started in.
+  setMatrixQuadrant: async (taskId, quadrant) => {
+    const prev = get().tasks;
+    const cur = prev.find((t) => t.id === taskId);
+    if (!cur || cur.matrix_quadrant === quadrant) return;
+    set((s) => ({
+      tasks: s.tasks.map((t) =>
+        t.id === taskId ? { ...t, matrix_quadrant: quadrant } : t,
+      ),
+    }));
+    const { error } = await supabase()
+      .from('tasks')
+      .update({ matrix_quadrant: quadrant })
+      .eq('id', taskId);
+    if (error) {
+      set({ tasks: prev });
+      throw error;
+    }
+  },
+
+  // Phase 2 — append a task to a day's sequenced set. If the task is already
+  // assigned to that date this becomes a no-op for membership; we still bump
+  // its today_sequence to the bottom so a fresh add lands at the end of the
+  // list rather than wherever it was before.
+  addTaskToToday: async (taskId, date) => {
+    const { tasks } = get();
+    const onDay = tasks.filter((t) => t.planned_for_date === date);
+    const maxSeq = onDay.reduce(
+      (m, t) => Math.max(m, t.today_sequence ?? 0),
+      0,
+    );
+    const nextSeq = maxSeq + 1;
+    set((s) => ({
+      tasks: s.tasks.map((t) =>
+        t.id === taskId
+          ? { ...t, planned_for_date: date, today_sequence: nextSeq }
+          : t,
+      ),
+    }));
+    const { error } = await supabase()
+      .from('tasks')
+      .update({ planned_for_date: date, today_sequence: nextSeq })
+      .eq('id', taskId);
+    if (error) {
+      // Re-fetch on failure so the UI doesn't drift; throwing would interrupt
+      // the picker flow which is annoying for the user.
+      void get().fetchTasks();
+      throw error;
+    }
+  },
+
   // New-spec-1 Feature 4 — load ALL active timers, not just the most recent.
   fetchActiveSessions: async () => {
     const { userId } = get();
@@ -1061,6 +1412,18 @@ export const useStore = create<Store>()(
     if (error) throw error;
     const row = data as TrackedSession;
     set((s) => ({ activeSessions: [...s.activeSessions, row] }));
+
+    // Phase 1.2 — stamp last_progress_at so the "not recording time" warning
+    // disappears immediately on this card. Fire-and-forget; the warning state
+    // is purely UI signal and a missed write means the next session save will
+    // refresh it.
+    const nowISO = new Date().toISOString();
+    set((s) => ({
+      tasks: s.tasks.map((t) =>
+        t.id === taskId ? { ...t, last_progress_at: nowISO } : t,
+      ),
+    }));
+    void supabase().from('tasks').update({ last_progress_at: nowISO }).eq('id', taskId);
 
     // Auto-promote todo → in_progress when work actively starts. The view
     // (v_task_status) already sees this as in_progress because the open
@@ -1130,11 +1493,38 @@ export const useStore = create<Store>()(
       })
       .eq('id', sessionId);
     if (error) throw error;
+    // Roll the just-finished session's duration into the local task / subtask
+    // tracked_total_seconds so the "time invested" chip updates immediately.
+    // Also stamp last_progress_at so the "no time logged" warning clears.
+    const nowISO = now.toISOString();
+    const taskId = sess.task_id;
+    const subtaskId = sess.subtask_id;
     set((s) => ({
       activeSessions: s.activeSessions.filter((x) => x.id !== sessionId),
       lastStopSummary: { durationSeconds: dur, at: Date.now() },
       focusSessionId: s.focusSessionId === sessionId ? null : s.focusSessionId,
+      tasks: taskId
+        ? s.tasks.map((t) =>
+            t.id === taskId
+              ? {
+                  ...t,
+                  tracked_total_seconds: t.tracked_total_seconds + dur,
+                  last_progress_at: nowISO,
+                  subtasks: subtaskId
+                    ? t.subtasks.map((sub) =>
+                        sub.id === subtaskId
+                          ? { ...sub, tracked_total_seconds: sub.tracked_total_seconds + dur }
+                          : sub,
+                      )
+                    : t.subtasks,
+                }
+              : t,
+          )
+        : s.tasks,
     }));
+    if (taskId) {
+      void supabase().from('tasks').update({ last_progress_at: nowISO }).eq('id', taskId);
+    }
   },
 
   // Focus Lock — planned duration hit zero. Stops the session and re-pulls
@@ -1182,11 +1572,37 @@ export const useStore = create<Store>()(
       })
       .eq('id', sessionId);
     if (error) throw error;
+    // Same optimistic rollup as stopSession — a broken session still recorded
+    // real time and the chip should show it.
+    const nowISO_b = now.toISOString();
+    const taskId_b = sess.task_id;
+    const subtaskId_b = sess.subtask_id;
     set((s) => ({
       activeSessions: s.activeSessions.filter((x) => x.id !== sessionId),
       lastStopSummary: { durationSeconds: dur, at: Date.now() },
       focusSessionId: s.focusSessionId === sessionId ? null : s.focusSessionId,
+      tasks: taskId_b
+        ? s.tasks.map((t) =>
+            t.id === taskId_b
+              ? {
+                  ...t,
+                  tracked_total_seconds: t.tracked_total_seconds + dur,
+                  last_progress_at: nowISO_b,
+                  subtasks: subtaskId_b
+                    ? t.subtasks.map((sub) =>
+                        sub.id === subtaskId_b
+                          ? { ...sub, tracked_total_seconds: sub.tracked_total_seconds + dur }
+                          : sub,
+                      )
+                    : t.subtasks,
+                }
+              : t,
+          )
+        : s.tasks,
     }));
+    if (taskId_b) {
+      void supabase().from('tasks').update({ last_progress_at: nowISO_b }).eq('id', taskId_b);
+    }
     await get().fetchProfileV2();
   },
 
@@ -1227,10 +1643,35 @@ export const useStore = create<Store>()(
       })
       .eq('id', sessionId);
     if (error) throw error;
+    // Pause is a stop in disguise — fold the duration into the chip rollup.
+    const nowISO_p = now.toISOString();
+    const taskId_p = sess.task_id;
+    const subtaskId_p = sess.subtask_id;
     set((s) => ({
       activeSessions: s.activeSessions.filter((x) => x.id !== sessionId),
       focusSessionId: s.focusSessionId === sessionId ? null : s.focusSessionId,
+      tasks: taskId_p
+        ? s.tasks.map((t) =>
+            t.id === taskId_p
+              ? {
+                  ...t,
+                  tracked_total_seconds: t.tracked_total_seconds + dur,
+                  last_progress_at: nowISO_p,
+                  subtasks: subtaskId_p
+                    ? t.subtasks.map((sub) =>
+                        sub.id === subtaskId_p
+                          ? { ...sub, tracked_total_seconds: sub.tracked_total_seconds + dur }
+                          : sub,
+                      )
+                    : t.subtasks,
+                }
+              : t,
+          )
+        : s.tasks,
     }));
+    if (taskId_p) {
+      void supabase().from('tasks').update({ last_progress_at: nowISO_p }).eq('id', taskId_p);
+    }
   },
 
   // Feature 05 — Break button. Within a single session row, toggle into a
@@ -1301,8 +1742,9 @@ export const useStore = create<Store>()(
   // Manually edit a session's start/end window. Used by the Timeline "Adjust"
   // popover so users can trim an abandoned timer that painted too much time.
   // Recomputes duration_seconds from the new window, net of any break_seconds
-  // already accrued on the row.
-  updateSessionTimes: async (sessionId, startedAtISO, endedAtISO) => {
+  // already accrued on the row. Phase 4 — also writes manually_entered=true
+  // by default plus optional break_label / note / block_type changes.
+  updateSessionTimes: async (sessionId, startedAtISO, endedAtISO, opts) => {
     const startMs = new Date(startedAtISO).getTime();
     const endMs = new Date(endedAtISO).getTime();
     if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
@@ -1313,18 +1755,70 @@ export const useStore = create<Store>()(
     const sess = activeSessions.find((s) => s.id === sessionId);
     const breakTotal = sess?.break_seconds ?? 0;
     const dur = Math.max(0, window - breakTotal);
+    const payload: Record<string, unknown> = {
+      started_at: startedAtISO,
+      ended_at: endedAtISO,
+      duration_seconds: dur,
+      // Default to true: any explicit call to updateSessionTimes is, by
+      // definition, the user touching the row after the fact.
+      manually_entered: opts?.manuallyEntered ?? true,
+    };
+    if (opts?.blockType !== undefined) payload.block_type = opts.blockType;
+    if (opts?.breakLabel !== undefined) payload.break_label = opts.breakLabel;
+    if (opts?.breakAutoDetected !== undefined)
+      payload.break_auto_detected = opts.breakAutoDetected;
+    if (opts?.note !== undefined) payload.note = opts.note;
     const { error } = await supabase()
       .from('tracked_sessions')
-      .update({
-        started_at: startedAtISO,
-        ended_at: endedAtISO,
-        duration_seconds: dur,
-      })
+      .update(payload)
       .eq('id', sessionId);
     if (error) throw error;
     set((s) => ({
       activeSessions: s.activeSessions.filter((x) => x.id !== sessionId),
     }));
+    // Refetch so the "time invested" chip reflects the edited duration. The
+    // closed tracked_sessions sum is computed at fetchTasks time, so an
+    // in-place edit can't be optimistic without redoing the math here.
+    await get().fetchTasks();
+  },
+
+  addSession: async (taskId, startedAtISO, endedAtISO, opts) => {
+    const startMs = new Date(startedAtISO).getTime();
+    const endMs = new Date(endedAtISO).getTime();
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+      throw new Error('Invalid session window');
+    }
+    const { userId } = get();
+    if (!userId) throw new Error('Not signed in');
+    const dur = Math.floor((endMs - startMs) / 1000);
+    const { error } = await supabase()
+      .from('tracked_sessions')
+      .insert({
+        user_id: userId,
+        task_id: taskId,
+        subtask_id: null,
+        planned_block_id: null,
+        started_at: startedAtISO,
+        ended_at: endedAtISO,
+        duration_seconds: dur,
+        mode: 'open',
+        was_paused: false,
+        drift_events: [],
+        broken: false,
+        broken_reason: null,
+        planned_duration_seconds: null,
+        break_seconds: 0,
+        is_on_break: false,
+        last_break_started_at: null,
+        // Phase 4 — audit flag + optional break metadata.
+        manually_entered: opts?.manuallyEntered ?? true,
+        block_type: opts?.blockType ?? 'tracked',
+        break_label: opts?.breakLabel ?? null,
+        break_auto_detected: opts?.breakAutoDetected ?? false,
+        note: opts?.note ?? null,
+      });
+    if (error) throw error;
+    await get().fetchTasks();
   },
 
   deleteSession: async (sessionId) => {
@@ -1337,6 +1831,7 @@ export const useStore = create<Store>()(
       activeSessions: s.activeSessions.filter((x) => x.id !== sessionId),
       focusSessionId: s.focusSessionId === sessionId ? null : s.focusSessionId,
     }));
+    await get().fetchTasks();
   },
 
   // Called every 30s by useLiveTimer so a browser crash doesn't lose progress.
@@ -1557,12 +2052,13 @@ export const useStore = create<Store>()(
           `
           id, user_id, title, description, status, completed_at, priority, due_date,
           total_time_seconds, estimated_seconds, sort_order, allow_alarms,
-          planned_for_date,
+          planned_for_date, today_sequence, matrix_quadrant, last_progress_at,
           subtasks ( id, task_id, title, is_done, total_time_seconds, sort_order ),
           task_tags ( tag_id ),
           task_categories ( category_id ),
           task_projects ( project_id ),
-          time_sessions ( id, task_id, subtask_id, started_at, duration_seconds, label )
+          time_sessions ( id, task_id, subtask_id, started_at, duration_seconds, label ),
+          tracked_sessions ( subtask_id, duration_seconds, ended_at )
         `,
         )
         .eq('user_id', userId)
@@ -1635,6 +2131,7 @@ export const useStore = create<Store>()(
         task_categories: [],
         task_projects: [],
         time_sessions: [],
+        tracked_sessions: [],
       // A fresh task has no tracked_sessions and no completed_at, so
       // v_task_status will derive 'todo'. Hardcode the local seed to match
       // the spec invariant (no flicker through 'in_progress' or 'done').
@@ -1652,6 +2149,32 @@ export const useStore = create<Store>()(
 
   updateTask: async (id, updates) => {
     const prev = get().tasks;
+    const before = prev.find((t) => t.id === id);
+    // Phase 1.3 — edits reset task to To Do (configurable).
+    // Trigger fields (per upgrade brief): title, estimated_seconds, project,
+    // subtasks. project/subtask changes happen via separate store actions
+    // (updateTaskProjects / addSubtask / etc); those call sites trigger the
+    // reset directly via `applyEditReset`. Here we only check the in-row fields.
+    const triggerFields = (get().prefs?.edit_reset_fields ?? [
+      'title',
+      'estimate',
+      'project',
+      'subtasks',
+    ]) as string[];
+    const editResetsEnabled = get().prefs?.edit_resets_status ?? true;
+    const titleChanged =
+      updates.title !== undefined && before && updates.title !== before.title;
+    const estimateChanged =
+      updates.estimated_seconds !== undefined &&
+      before &&
+      (updates.estimated_seconds ?? null) !== (before.estimated_seconds ?? null);
+    const shouldReset =
+      editResetsEnabled &&
+      before &&
+      before.effective_status === 'in_progress' &&
+      ((titleChanged && triggerFields.includes('title')) ||
+        (estimateChanged && triggerFields.includes('estimate')));
+
     set((s) => ({
       tasks: s.tasks.map((t) => {
         if (t.id !== id) return t;
@@ -1661,6 +2184,12 @@ export const useStore = create<Store>()(
         // Especially critical for Done-checkbox toggles where the user expects
         // immediate visual feedback.
         merged.effective_status = deriveEffectiveStatus(merged);
+        // Phase 1.3 — optimistically demote to todo. v_task_status still sees
+        // logged sessions and will return 'in_progress' on next refetch; the
+        // store relies on the legacy `tasks.status` write to keep the demotion
+        // visible after refetch (rowToTask falls back to row.status when
+        // v_task_status has no row for this id — see fetchTasks).
+        if (shouldReset) merged.effective_status = 'todo';
         return merged;
       }),
     }));
@@ -1676,14 +2205,58 @@ export const useStore = create<Store>()(
     if (updates.allow_alarms !== undefined) payload.allow_alarms = updates.allow_alarms;
     if (updates.planned_for_date !== undefined)
       payload.planned_for_date = updates.planned_for_date;
+    if (updates.today_sequence !== undefined)
+      payload.today_sequence = updates.today_sequence;
+    if (updates.matrix_quadrant !== undefined)
+      payload.matrix_quadrant = updates.matrix_quadrant;
+    if (updates.last_progress_at !== undefined)
+      payload.last_progress_at = updates.last_progress_at;
     if (updates.sort_order !== undefined) payload.sort_order = updates.sort_order;
+    if (shouldReset) payload.status = 'todo';
+    // Phase 1.2 — any edit is "real progress" except for the reset itself
+    // (which is the user un-doing momentum, not adding it). Don't stamp on
+    // a no-op call.
     if (Object.keys(payload).length === 0) return;
+    if (!shouldReset && before && (titleChanged || estimateChanged))
+      payload.last_progress_at = new Date().toISOString();
     const { error } = await supabase().from('tasks').update(payload).eq('id', id);
     if (error) {
       set({ tasks: prev });
       throw error;
     }
+    if (shouldReset && before) {
+      // Show an undo toast that flips the task back. 8 s window per brief.
+      get().showResetUndoToast(id, before.status);
+    }
     set({ savedViewCountsFetchedAt: null });
+  },
+
+  // Phase 1.3 — undo handler for the "Moved to To Do — undo" toast.
+  showResetUndoToast: (taskId, previousStatus) => {
+    const id = (get().toast?.id ?? 0) + 1;
+    set({
+      toast: { message: 'Moved to To Do — undo', id, action: { kind: 'edit_reset_undo', taskId, previousStatus } },
+    });
+    setTimeout(() => {
+      // Self-dismiss if no newer toast superseded this one.
+      const cur = get().toast;
+      if (cur && cur.id === id) set({ toast: null });
+    }, 8000);
+  },
+  undoEditReset: async (taskId, previousStatus) => {
+    // Flip optimistically + write back to DB. effective_status re-derives from
+    // sessions, so as long as the task still has logged time, the UI returns
+    // to 'in_progress' instantly.
+    set((s) => ({
+      tasks: s.tasks.map((t) => {
+        if (t.id !== taskId) return t;
+        const merged = { ...t, status: previousStatus };
+        merged.effective_status = deriveEffectiveStatus(merged);
+        return merged;
+      }),
+      toast: null,
+    }));
+    await supabase().from('tasks').update({ status: previousStatus }).eq('id', taskId);
   },
 
   deleteTask: async (id) => {
@@ -1711,7 +2284,7 @@ export const useStore = create<Store>()(
       .select()
       .single();
     if (error) throw error;
-    const sub = data as SubtaskType;
+    const sub: SubtaskType = { ...(data as SubtaskRow), tracked_total_seconds: 0 };
     set((s) => ({
       tasks: s.tasks.map((t) =>
         t.id === taskId ? { ...t, subtasks: [...t.subtasks, sub] } : t,
@@ -1735,9 +2308,13 @@ export const useStore = create<Store>()(
     else if (newDone && task.status === 'todo') nextStatus = 'in_progress';
 
     const prev = get().tasks;
+    // Phase 1.2 — toggling a subtask is real progress; reset the warning clock.
+    const nowISO = new Date().toISOString();
     set((s) => ({
       tasks: s.tasks.map((t) =>
-        t.id === taskId ? { ...t, subtasks: updatedSubs, status: nextStatus } : t,
+        t.id === taskId
+          ? { ...t, subtasks: updatedSubs, status: nextStatus, last_progress_at: nowISO }
+          : t,
       ),
     }));
 
@@ -1749,15 +2326,15 @@ export const useStore = create<Store>()(
       set({ tasks: prev });
       throw error;
     }
-    if (nextStatus !== task.status) {
-      const { error: taskErr } = await supabase()
-        .from('tasks')
-        .update({ status: nextStatus })
-        .eq('id', taskId);
-      if (taskErr) {
-        set({ tasks: prev });
-        throw taskErr;
-      }
+    const taskUpdates: Record<string, unknown> = { last_progress_at: nowISO };
+    if (nextStatus !== task.status) taskUpdates.status = nextStatus;
+    const { error: taskErr } = await supabase()
+      .from('tasks')
+      .update(taskUpdates)
+      .eq('id', taskId);
+    if (taskErr) {
+      set({ tasks: prev });
+      throw taskErr;
     }
   },
 
@@ -1837,6 +2414,7 @@ export const useStore = create<Store>()(
       p_label: label,
     });
     if (error) throw error;
+    const nowISO = new Date().toISOString();
     set((s) => ({
       tasks: s.tasks.map((t) => {
         if (t.id !== taskId) return t;
@@ -1851,6 +2429,8 @@ export const useStore = create<Store>()(
         return {
           ...t,
           total_time_seconds: t.total_time_seconds + duration,
+          // Phase 1.2 — fresh session means real progress just happened.
+          last_progress_at: nowISO,
           sessions: [...t.sessions, newSession],
           subtasks: subtaskId
             ? t.subtasks.map((sub) =>
@@ -1862,6 +2442,7 @@ export const useStore = create<Store>()(
         };
       }),
     }));
+    void supabase().from('tasks').update({ last_progress_at: nowISO }).eq('id', taskId);
   },
 
   addTag: async (name, color) => {
@@ -2035,13 +2616,39 @@ export const useStore = create<Store>()(
   fetchProjects: async () => {
     const { userId } = get();
     if (!userId) return;
-    const { data, error } = await supabase()
-      .from('projects')
-      .select('id, name, color, status')
-      .eq('user_id', userId)
-      .order('sort_order', { ascending: true });
-    if (error) throw error;
-    set({ projects: (data ?? []) as ProjectType[] });
+    // Two parallel queries: projects + staleness flags from v_project_staleness
+    // (migration 0033). Merged in JS by id. The view inherits RLS from
+    // projects + user_preferences, so the user only sees their own rows.
+    const [projRes, staleRes] = await Promise.all([
+      supabase()
+        .from('projects')
+        .select('id, name, color, status, last_activity_at')
+        .eq('user_id', userId)
+        .order('sort_order', { ascending: true }),
+      supabase()
+        .from('v_project_staleness')
+        .select('project_id, is_stale')
+        .eq('user_id', userId),
+    ]);
+    if (projRes.error) throw projRes.error;
+    // v_project_staleness was added in 0033. If the migration isn't applied
+    // yet (e.g. local dev DB lagging), we soft-fail and treat everything as
+    // non-stale rather than blocking the entire dashboard.
+    const staleMap = new Map<string, boolean>();
+    if (!staleRes.error) {
+      for (const r of (staleRes.data ?? []) as { project_id: string; is_stale: boolean }[]) {
+        staleMap.set(r.project_id, r.is_stale);
+      }
+    }
+    const rows = (projRes.data ?? []) as Array<
+      ProjectType & { last_activity_at: string | null }
+    >;
+    set({
+      projects: rows.map((p) => ({
+        ...p,
+        is_stale: staleMap.get(p.id) ?? false,
+      })),
+    });
   },
 
   addProject: async (name, color, status) => {
@@ -2159,6 +2766,39 @@ export const useStore = create<Store>()(
   insightsSelectedProjectId: null,
   insightsSelectedTagId: null,
 
+  // Phase 7 — Honest Score
+  honestScore: null,
+  honestScoreLoading: false,
+  honestScoreError: null,
+  fetchHonestScore: async (date, force) => {
+    const { userId, honestScore, honestScoreLoading } = get();
+    if (!userId) return;
+    // Cache by date so toggling Insights tabs doesn't re-fetch. The server
+    // defaults to yesterday-in-user-tz; the client passes `date` only when
+    // the user explicitly picks a different day (Phase 7 doesn't expose
+    // that picker yet, but the slice is ready for it).
+    if (!force && honestScore && (!date || honestScore.date === date))
+      return;
+    if (honestScoreLoading) return;
+    set({ honestScoreLoading: true, honestScoreError: null });
+    try {
+      const qs = date ? `?date=${encodeURIComponent(date)}` : '';
+      const res = await fetch(`/api/insights/honest-score${qs}`, {
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      const json = (await res.json()) as NonNullable<Store['honestScore']>;
+      set({ honestScore: json, honestScoreLoading: false });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Failed to load Honest Score';
+      set({ honestScoreLoading: false, honestScoreError: message });
+    }
+  },
+
   setInsightsRange: (range) => {
     set({
       insightsRange: range,
@@ -2241,6 +2881,13 @@ export const useStore = create<Store>()(
           // fetchPrefs on first load.
           scheduleSubView: state.scheduleSubView,
           scheduleDayStartMs: state.scheduleDayStartMs,
+          // Phase 1.1 — hide-completed preference persists locally. Initial
+          // seed comes from user_preferences.hide_completed_default on the
+          // first fetchPrefs call this session.
+          showCompleted: state.showCompleted,
+          // Phase 2 — persist the active top-level view so a returning user
+          // lands back on whatever they had last (Today on first visit).
+          view: state.view,
         }) as Partial<Store>,
     },
   ),

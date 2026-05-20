@@ -60,7 +60,8 @@ export function PomodoroTimer({ task, expanded, onToggle }: Props) {
     startTimeRef.current = null;
   };
 
-  const totalTime = task.total_time_seconds + (running ? elapsed : 0);
+  const totalTime =
+    task.total_time_seconds + task.tracked_total_seconds + (running ? elapsed : 0);
   const sessionCount = task.sessions.length + (running ? 1 : 0);
 
   const timerIcon = (
@@ -150,7 +151,9 @@ export function PomodoroTimer({ task, expanded, onToggle }: Props) {
           {task.subtasks.map((s) => (
             <option key={s.id} value={s.id}>
               {s.is_done ? '✅' : '○'} {s.title}
-              {s.total_time_seconds > 0 ? ` (${fmtShort(s.total_time_seconds)})` : ''}
+              {s.total_time_seconds + s.tracked_total_seconds > 0
+                ? ` (${fmtShort(s.total_time_seconds + s.tracked_total_seconds)})`
+                : ''}
             </option>
           ))}
         </select>

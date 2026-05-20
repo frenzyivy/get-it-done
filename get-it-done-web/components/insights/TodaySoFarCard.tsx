@@ -113,7 +113,7 @@ export function TodaySoFarCard() {
                   {t.title}
                 </span>
                 <span className="text-[12px] font-mono tabular-nums text-[#888]">
-                  {fmtShort(t.total_time_seconds)}
+                  {fmtShort(t.total_time_seconds + t.tracked_total_seconds)}
                 </span>
               </div>
             );

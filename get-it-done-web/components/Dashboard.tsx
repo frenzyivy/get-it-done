@@ -12,6 +12,8 @@ import { ScheduleView } from './ScheduleView';
 import { TimelineView } from './TimelineView';
 import { PriorityView } from './PriorityView';
 import { CalendarView } from './CalendarView';
+import { TodayView } from './TodayView';
+import { MatrixView } from './MatrixView';
 import { DailyGoalBar } from './DailyGoalBar';
 import { NowTrackingBar } from './NowTrackingBar';
 import { ColumnSwitcher } from './ColumnSwitcher';
@@ -23,6 +25,7 @@ import { RolloverPromptModal } from './RolloverPromptModal';
 import { FloatingAddButton } from './FloatingAddButton';
 import { FocusLockPicker } from './FocusLockPicker';
 import { Toast } from './Toast';
+import { HideCompletedToggle } from './HideCompletedToggle';
 // QuickAddBar moved to app/layout.tsx (Phase 6 polish) so Ctrl+K works on
 // /insights and /settings too.
 
@@ -118,6 +121,8 @@ export function Dashboard({ userId }: { userId: string }) {
           <div className="flex bg-white rounded-xl p-[3px] shadow-[0_1px_4px_rgba(0,0,0,0.06),0_0_0_1px_rgba(0,0,0,0.04)]">
             {(
               [
+                { id: 'today', icon: '☀', label: 'Today' },
+                { id: 'matrix', icon: '⊞', label: 'Matrix' },
                 { id: 'kanban', icon: '▤', label: 'Board' },
                 { id: 'list', icon: '☰', label: 'List' },
                 { id: 'priority', icon: '!', label: 'Priority' },
@@ -144,16 +149,33 @@ export function Dashboard({ userId }: { userId: string }) {
               <ColumnSwitcher />
             </div>
           )}
+          {/* Phase 1.1 — Hide completed toggle. Shown on every multi-task view.
+              Schedule / Timeline / Calendar don't render task lists, so we
+              suppress it there. */}
+          {(view === 'kanban' || view === 'list' || view === 'priority') && (
+            <div className={view === 'kanban' ? '' : 'flex-1 flex justify-end'}>
+              <HideCompletedToggle />
+            </div>
+          )}
         </div>
 
-        {/* Filter bar — Board / List / Priority. Schedule + Timeline drive
-            their own data shape and aren't filter-aware in this step. */}
-        {(view === 'kanban' || view === 'list' || view === 'priority') && (
-          <FilterBar />
-        )}
+        {/* Filter bar — Board / List / Priority / Today / Matrix. Schedule +
+            Timeline drive their own data shape and aren't filter-aware in
+            this step. Today + Matrix were added in Feature 7 (drag-from-
+            results) so the global search input is reachable from those
+            views — its results panel renders inside each view's DndContext. */}
+        {(view === 'kanban' ||
+          view === 'list' ||
+          view === 'priority' ||
+          view === 'today' ||
+          view === 'matrix') && <FilterBar />}
 
         {loading && tasks.length === 0 ? (
           <SkeletonBoard />
+        ) : view === 'today' ? (
+          <TodayView />
+        ) : view === 'matrix' ? (
+          <MatrixView />
         ) : view === 'kanban' ? (
           <BoardView />
         ) : view === 'list' ? (

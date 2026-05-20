@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useStore } from '@/lib/store';
 import { DailyProgressTab } from './insights/DailyProgressTab';
 import type {
@@ -160,6 +160,179 @@ function LegendNote({ children }: { children: React.ReactNode }) {
 }
 
 // ---- Sections ------------------------------------------------------------
+
+// Phase 7 — Honest Score hero card. Always-on, always shows "yesterday" by
+// default. Pure-derived from planned_blocks + tracked_sessions on a single
+// day (see /api/insights/honest-score). Sits at the very top of the "Where
+// your time went" tab.
+function HonestScoreCard() {
+  const score = useStore((s) => s.honestScore);
+  const loading = useStore((s) => s.honestScoreLoading);
+  const err = useStore((s) => s.honestScoreError);
+  const fetchHonestScore = useStore((s) => s.fetchHonestScore);
+  const userId = useStore((s) => s.userId);
+
+  useEffect(() => {
+    if (!userId) return;
+    void fetchHonestScore();
+  }, [userId, fetchHonestScore]);
+
+  if (err) {
+    return (
+      <div
+        className="rounded-[14px] p-4 mb-4 text-[13px]"
+        style={{
+          background: '#fde8e8',
+          color: '#991b1b',
+          border: '1px solid #fca5a5',
+        }}
+      >
+        Couldn’t load Honest Score: {err}
+      </div>
+    );
+  }
+
+  if (loading && !score) {
+    return (
+      <div
+        className="rounded-[14px] p-5 mb-4 text-[13px]"
+        style={{ background: PRIMARY, color: '#fff' }}
+      >
+        Computing Honest Score…
+      </div>
+    );
+  }
+
+  if (!score) return null;
+
+  const planned = score.planned_seconds;
+  const tracked = score.tracked_seconds;
+  const offPlan = score.off_plan_seconds;
+  const breakSec = score.break_seconds;
+  const denomSec = Math.max(planned, tracked);
+  const offPlanPct =
+    denomSec > 0 ? Math.round((offPlan / denomSec) * 100) : 0;
+  const breakPct =
+    denomSec > 0 ? Math.round((breakSec / denomSec) * 100) : 0;
+
+  const noData = denomSec === 0;
+
+  // Big ring math — single arc representing honest_score_pct on a 100-unit
+  // circle. Matches the demo's hero card.
+  const R = 36;
+  const C = 2 * Math.PI * R;
+  const dashOffset = C * (1 - score.honest_score_pct / 100);
+
+  const dateLabel = new Date(score.date + 'T12:00:00Z').toLocaleDateString(
+    undefined,
+    { weekday: 'long', month: 'short', day: 'numeric' },
+  );
+
+  return (
+    <div
+      className="rounded-[16px] p-5 mb-5 text-white"
+      style={{
+        background:
+          'linear-gradient(110deg, #11142A 0%, #1A1F44 40%, #2A2350 60%, #15172E 100%)',
+        boxShadow:
+          '0 14px 36px -16px rgba(20, 14, 60, 0.5), inset 0 1px 0 rgba(255,255,255,0.06)',
+      }}
+    >
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+        <div>
+          <div className="text-[10px] font-mono uppercase tracking-[1.5px] opacity-60">
+            Honest score · {dateLabel}
+          </div>
+          <div className="text-[20px] font-extrabold mt-[2px]">
+            {noData
+              ? 'No planned or tracked time'
+              : `${score.honest_score_pct}% on plan`}
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          {!noData && (
+            <svg viewBox="0 0 100 100" className="w-[68px] h-[68px]">
+              <circle
+                cx={50}
+                cy={50}
+                r={R}
+                fill="none"
+                stroke="rgba(255,255,255,0.18)"
+                strokeWidth={6}
+              />
+              <circle
+                cx={50}
+                cy={50}
+                r={R}
+                fill="none"
+                stroke="#fff"
+                strokeWidth={6}
+                strokeDasharray={C}
+                strokeDashoffset={dashOffset}
+                strokeLinecap="round"
+                transform="rotate(-90 50 50)"
+              />
+            </svg>
+          )}
+          <div className="text-right">
+            <div className="text-[34px] font-extrabold tabular-nums leading-none">
+              {noData ? '—' : `${score.honest_score_pct}%`}
+            </div>
+            <div className="text-[10px] opacity-60 uppercase tracking-[1px] mt-1">
+              On plan
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {!noData && (
+        <div className="text-[12px] opacity-85 leading-[1.5] mb-3">
+          You planned <b>{fmtHM(planned)}</b>. You tracked{' '}
+          <b>{fmtHM(tracked)}</b>. {offPlanPct}% off plan, {breakPct}% on
+          breaks.
+        </div>
+      )}
+
+      {!noData && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-[6px] mt-2">
+          <MiniStat label="Planned" value={fmtHM(planned)} />
+          <MiniStat label="Tracked" value={fmtHM(tracked)} />
+          <MiniStat label="Off plan" value={fmtHM(offPlan)} />
+          <MiniStat label="Breaks" value={fmtHM(breakSec)} />
+        </div>
+      )}
+
+      {score.manual_caveat && (
+        <div
+          className="rounded-[8px] mt-3 px-3 py-2 text-[11px] flex items-start gap-2"
+          style={{ background: 'rgba(252,211,77,0.18)', color: '#fcd34d' }}
+        >
+          <span aria-hidden>⚠</span>
+          <span>
+            Score based on {score.manual_share_pct}% manual entries — verify
+            with the auto-tracked baseline.
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div
+      className="rounded-[8px] px-3 py-2"
+      style={{ background: 'rgba(255,255,255,0.06)' }}
+    >
+      <div className="text-[9px] font-mono uppercase tracking-[1px] opacity-55">
+        {label}
+      </div>
+      <div className="text-[14px] font-extrabold tabular-nums mt-[2px]">
+        {value}
+      </div>
+    </div>
+  );
+}
 
 function Hero() {
   const range = useStore((s) => s.insightsRange);
@@ -461,6 +634,9 @@ function DrilldownProjectSection() {
 function MatrixSection() {
   const rowsSel = useStore((s) => s.insightsPayload?.matrix.rows);
   const catsSel = useStore((s) => s.insightsPayload?.matrix.category_order);
+  const tasksByProject = useStore(
+    (s) => s.insightsPayload?.tasks_by_project ?? {},
+  );
   const rows = useMemo(() => rowsSel ?? [], [rowsSel]);
   const cats = useMemo(() => catsSel ?? [], [catsSel]);
   const maxCell = useMemo(() => {
@@ -468,6 +644,14 @@ function MatrixSection() {
     for (const r of rows) for (const v of Object.values(r.cells)) if (v > m) m = v;
     return m;
   }, [rows]);
+
+  // Phase 7 — click-through state. When set, the side sheet renders the
+  // contributing tasks for that intersection. Data is derived from the
+  // existing tasks_by_project map — no new endpoint needed.
+  const [drilldown, setDrilldown] = useState<{
+    projectId: string;
+    categoryId: string;
+  } | null>(null);
 
   if (rows.length === 0 || cats.length === 0) {
     return (
@@ -533,25 +717,46 @@ function MatrixSection() {
                 {cats.map((c) => {
                   const v = r.cells[c.id] ?? 0;
                   const opacity = v > 0 && maxCell > 0 ? 0.05 + (v / maxCell) * 0.55 : 0;
+                  // Phase 7 — cell-as-button. Empty cells stay non-interactive
+                  // so the cursor doesn't suggest there's something to drill
+                  // into. The full cell is clickable for a big target.
                   return (
                     <td
                       key={c.id}
-                      className="py-[10px] px-[8px] text-center tabular-nums relative"
-                      style={{
-                        color: v > 0 ? INK : INK_MUTE,
-                        fontWeight: v > 0 ? 600 : 400,
-                        borderBottom: `1px solid ${LINE_SOFT}`,
-                      }}
+                      className="p-0 relative"
+                      style={{ borderBottom: `1px solid ${LINE_SOFT}` }}
                     >
-                      {v > 0 && (
-                        <span
-                          className="absolute rounded-[5px] z-0"
-                          style={{ inset: 4, background: PRIMARY, opacity }}
-                        />
+                      {v > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setDrilldown({
+                              projectId: r.project_id,
+                              categoryId: c.id,
+                            })
+                          }
+                          className="block w-full py-[10px] px-[8px] text-center tabular-nums relative cursor-pointer bg-transparent border-0 transition-colors hover:bg-[rgba(0,0,0,0.04)]"
+                          style={{
+                            color: INK,
+                            fontWeight: 600,
+                          }}
+                          title={`${r.project_name} × ${c.name} — click for tasks`}
+                          aria-label={`Drill into ${r.project_name} × ${c.name}`}
+                        >
+                          <span
+                            className="absolute rounded-[5px] z-0 pointer-events-none"
+                            style={{ inset: 4, background: PRIMARY, opacity }}
+                          />
+                          <span className="relative z-[1]">{fmtHM(v)}</span>
+                        </button>
+                      ) : (
+                        <div
+                          className="py-[10px] px-[8px] text-center tabular-nums"
+                          style={{ color: INK_MUTE, fontWeight: 400 }}
+                        >
+                          —
+                        </div>
                       )}
-                      <span className="relative z-[1]">
-                        {v > 0 ? fmtHM(v) : '—'}
-                      </span>
                     </td>
                   );
                 })}
@@ -574,8 +779,175 @@ function MatrixSection() {
         <em>category</em>, for that <em>project</em>. Row totals will slightly exceed
         the sum of cells because a single task with multiple categories counts into
         each cell (intentional — you want a “dev + learning” task to count in both).
+        Click any cell to see the tasks behind it.
       </LegendNote>
+
+      {drilldown && (
+        <MatrixCellDrilldown
+          projectId={drilldown.projectId}
+          categoryId={drilldown.categoryId}
+          projectName={
+            rows.find((r) => r.project_id === drilldown.projectId)
+              ?.project_name ?? 'Project'
+          }
+          categoryName={
+            cats.find((c) => c.id === drilldown.categoryId)?.name ?? 'Category'
+          }
+          categoryColor={
+            cats.find((c) => c.id === drilldown.categoryId)?.color ?? INK
+          }
+          cellSeconds={
+            rows.find((r) => r.project_id === drilldown.projectId)?.cells[
+              drilldown.categoryId
+            ] ?? 0
+          }
+          tasks={(tasksByProject[drilldown.projectId] ?? []).filter((t) =>
+            t.categories.some((cat) => cat.id === drilldown.categoryId),
+          )}
+          onClose={() => setDrilldown(null)}
+        />
+      )}
     </Section>
+  );
+}
+
+// Phase 7 — slide-in side sheet listing the tasks that fed a Matrix cell.
+// Derived purely from the existing /api/insights payload — no extra fetch.
+function MatrixCellDrilldown({
+  projectId,
+  categoryId,
+  projectName,
+  categoryName,
+  categoryColor,
+  cellSeconds,
+  tasks,
+  onClose,
+}: {
+  projectId: string;
+  categoryId: string;
+  projectName: string;
+  categoryName: string;
+  categoryColor: string;
+  cellSeconds: number;
+  tasks: import('@/types').InsightsTask[];
+  onClose: () => void;
+}) {
+  // Esc closes.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  // Silence unused — kept on the prop API for symmetry with the brief's
+  // suggested REST shape (`GET /api/insights/cell?category=&project=`),
+  // in case we want to fall back to a server endpoint later.
+  void projectId;
+  void categoryId;
+
+  const max = tasks.reduce((m, t) => Math.max(m, t.total_seconds), 0);
+
+  return (
+    <>
+      <div
+        onClick={onClose}
+        className="fixed inset-0 z-40 bg-black/30 animate-[fadeIn_0.15s_ease-out]"
+      />
+      <aside
+        className="fixed top-0 right-0 z-50 h-screen w-full sm:w-[460px] bg-white shadow-[-8px_0_30px_rgba(0,0,0,0.12)] flex flex-col animate-[slideInRight_0.2s_ease-out]"
+        role="dialog"
+        aria-label={`${projectName} × ${categoryName} — contributing tasks`}
+      >
+        <div
+          className="px-5 py-4 flex items-start justify-between"
+          style={{ borderBottom: `1px solid ${LINE}` }}
+        >
+          <div>
+            <div className="text-[11px] font-mono uppercase tracking-[1px] text-[#9ca3af] mb-[2px]">
+              Matrix cell · {tasks.length}{' '}
+              {tasks.length === 1 ? 'task' : 'tasks'}
+            </div>
+            <div className="text-[15px] font-extrabold text-[#1a1a2e] flex items-center gap-2 flex-wrap">
+              <span>{projectName}</span>
+              <span className="text-[#9ca3af]">×</span>
+              <span style={{ color: categoryColor }}>{categoryName}</span>
+            </div>
+            <div className="text-[12px] text-[#6b7280] mt-1">
+              Total: <b className="text-[#1a1a2e]">{fmtHM(cellSeconds)}</b>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="bg-transparent border-0 text-[#aaa] hover:text-[#1a1a2e] cursor-pointer text-xl leading-none p-1"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-3">
+          {tasks.length === 0 ? (
+            <div className="text-center py-10 text-[#9ca3af] text-[13px]">
+              No tasks in this cell for the current range.
+            </div>
+          ) : (
+            <div className="flex flex-col gap-1">
+              {tasks
+                .slice()
+                .sort((a, b) => b.total_seconds - a.total_seconds)
+                .map((t) => {
+                  const w = max > 0 ? (t.total_seconds / max) * 100 : 0;
+                  return (
+                    <div
+                      key={t.id}
+                      className="py-2"
+                      style={{
+                        borderBottom: `1px solid ${LINE_SOFT}`,
+                      }}
+                    >
+                      <div className="flex items-baseline justify-between gap-2">
+                        <div
+                          className="text-[13px] font-semibold text-[#1a1a2e] truncate flex-1"
+                          title={t.title}
+                        >
+                          {t.title}
+                        </div>
+                        <div className="text-[12px] font-mono font-bold tabular-nums text-[#1a1a2e] shrink-0">
+                          {fmtHM(t.total_seconds)}
+                        </div>
+                      </div>
+                      <div
+                        className="rounded-full h-[3px] mt-[6px] overflow-hidden"
+                        style={{ background: LINE_SOFT }}
+                      >
+                        <div
+                          className="h-full rounded-full"
+                          style={{
+                            width: `${Math.max(2, w)}%`,
+                            background: categoryColor,
+                          }}
+                        />
+                      </div>
+                      {t.categories.length > 1 && (
+                        <div className="text-[10px] text-[#9ca3af] mt-1">
+                          also tagged:{' '}
+                          {t.categories
+                            .filter((c) => c.id !== categoryId)
+                            .map((c) => c.name)
+                            .join(', ')}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+            </div>
+          )}
+        </div>
+      </aside>
+    </>
   );
 }
 
@@ -818,7 +1190,12 @@ export function Insights() {
           })}
         </div>
 
-        {tab === 'time' && <Hero />}
+        {tab === 'time' && (
+          <>
+            <HonestScoreCard />
+            <Hero />
+          </>
+        )}
 
         {err && (
           <div

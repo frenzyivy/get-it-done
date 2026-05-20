@@ -1,25 +1,25 @@
 'use client';
 
-import { fmtShort } from '@/lib/utils';
-import { TaskCard } from './TaskCard';
+import { useState } from 'react';
+import { fmtShort, fmtDueDate, isOverdue } from '@/lib/utils';
+import { useStore } from '@/lib/store';
+import { useLiveTimers } from '@/lib/useLiveTimer';
+import { PRIORITIES } from '@/lib/constants';
 import { AddTaskForm } from './AddTaskForm';
+import { StaleProjectBanner } from './StaleProjectBanner';
+import { EditTaskDrawer } from './EditTaskDrawer';
 import type { TaskType } from '@/types';
 
 type ColumnMode = 'active' | 'idle' | 'category' | 'unassigned';
 
 interface Props {
-  // Card label (project name OR category name OR "Unassigned").
   label: string;
-  // Hex color for the dot/accent. Empty string = neutral grey.
   color: string;
   tasks: TaskType[];
-  // Project mode drives both the pill (ACTIVE/IDLE/CATEGORY/UNASSIGNED) and
-  // the dark-navy "current focus" card background. 'active' = a running
-  // tracked session belongs to a task in this project.
   mode: ColumnMode;
-  // The "+ Add task to [label]" button auto-attaches to this project. null
-  // for category cards or the Unassigned bucket — those don't pre-attach.
   addProjectId: string | null;
+  isStale?: boolean;
+  lastActivityAt?: string | null;
 }
 
 export function ProjectCard({
@@ -28,12 +28,17 @@ export function ProjectCard({
   tasks,
   mode,
   addProjectId,
+  isStale,
+  lastActivityAt,
 }: Props) {
   const isActive = mode === 'active';
   const tasksShort = tasks.length < 4;
+  const openTasks = tasks.filter((t) => t.effective_status !== 'done');
 
-  // Stats from the already-loaded task list — no extra fetches.
-  const tracked = tasks.reduce((sum, t) => sum + t.total_time_seconds, 0);
+  const tracked = tasks.reduce(
+    (sum, t) => sum + t.total_time_seconds + t.tracked_total_seconds,
+    0,
+  );
   const open = tasks.filter((t) => t.effective_status !== 'done').length;
   const done = tasks.filter((t) => t.effective_status === 'done').length;
   const progress = computeProgress(tasks);
@@ -100,17 +105,30 @@ export function ProjectCard({
         />
       </div>
 
+      {isStale && addProjectId && !isActive && (
+        <StaleProjectBanner
+          projectId={addProjectId}
+          projectName={label}
+          openTasks={openTasks}
+          lastActivityAt={lastActivityAt ?? null}
+        />
+      )}
+
       {tasks.length > 0 && (
-        <div className="flex flex-col gap-[6px] max-h-[360px] overflow-y-auto pr-1">
-          {tasks.map((t) => (
-            <div
+        <div
+          className="flex flex-col rounded-lg overflow-hidden max-h-[360px] overflow-y-auto"
+          style={{
+            background: isActive ? 'rgba(255,255,255,0.04)' : '#fff',
+            border: `1px solid ${divider}`,
+          }}
+        >
+          {tasks.map((t, i) => (
+            <ProjectTaskRow
               key={t.id}
-              style={{
-                opacity: t.effective_status === 'done' ? 0.55 : 1,
-              }}
-            >
-              <TaskCard task={t} compact />
-            </div>
+              task={t}
+              isActive={isActive}
+              isFirst={i === 0}
+            />
           ))}
         </div>
       )}
@@ -126,6 +144,202 @@ export function ProjectCard({
         )}
       </div>
     </div>
+  );
+}
+
+// Compact one-line row used inside ProjectCard. Designed for the narrow
+// columns of the List view so titles don't wrap into a tower of one-word
+// lines. Click anywhere on the row to open the edit drawer; play/stop on the
+// right starts or stops a tracked session for the whole task.
+function ProjectTaskRow({
+  task,
+  isActive,
+  isFirst,
+}: {
+  task: TaskType;
+  isActive: boolean;
+  isFirst: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const activeSessions = useStore((s) => s.activeSessions);
+  const startTrackingTask = useStore((s) => s.startTrackingTask);
+  const stopSession = useStore((s) => s.stopSession);
+  const openFocusMode = useStore((s) => s.openFocusMode);
+  const prefs = useStore((s) => s.prefs);
+  const elapsedMap = useLiveTimers();
+
+  const sessionsForThisTask = activeSessions.filter((s) => s.task_id === task.id);
+  const taskLevelSession = sessionsForThisTask.find((s) => s.subtask_id === null);
+  const isTrackingThisTask = !!taskLevelSession;
+  const isTrackingThisCard = sessionsForThisTask.length > 0;
+  const liveElapsed = sessionsForThisTask.reduce(
+    (sum, s) => sum + (elapsedMap[s.id] ?? 0),
+    0,
+  );
+  const invested =
+    task.total_time_seconds + task.tracked_total_seconds + liveElapsed;
+
+  const isDone = task.effective_status === 'done';
+  const overdue = isOverdue(task.due_date, task.effective_status);
+  const priority = PRIORITIES.find((p) => p.value === task.priority) ?? PRIORITIES[0];
+
+  const doneSubs = task.subtasks.filter((s) => s.is_done).length;
+  const totalSubs = task.subtasks.length;
+
+  const ink = isActive ? '#fff' : '#1a1a2e';
+  const dim = isActive ? 'rgba(255,255,255,0.55)' : '#6b7280';
+
+  const handlePlay = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isTrackingThisTask && taskLevelSession) {
+      return void stopSession(taskLevelSession.id);
+    }
+    const defaultMode = prefs?.default_timer_mode ?? 'open';
+    const session = await startTrackingTask(task.id, null, defaultMode);
+    if (session && defaultMode !== 'open') openFocusMode(session.id);
+  };
+
+  return (
+    <>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => setEditing(true)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setEditing(true);
+          }
+        }}
+        className="flex items-center gap-2 px-[10px] py-[8px] cursor-pointer transition-colors"
+        style={{
+          borderTop: isFirst
+            ? 'none'
+            : `1px solid ${isActive ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'}`,
+          background: isTrackingThisCard
+            ? isActive
+              ? 'rgba(245,158,11,0.15)'
+              : '#fff7ed'
+            : 'transparent',
+          opacity: isDone ? 0.55 : 1,
+        }}
+        onMouseEnter={(e) => {
+          if (!isTrackingThisCard) {
+            e.currentTarget.style.background = isActive
+              ? 'rgba(255,255,255,0.04)'
+              : 'rgba(0,0,0,0.025)';
+          }
+        }}
+        onMouseLeave={(e) => {
+          if (!isTrackingThisCard) {
+            e.currentTarget.style.background = 'transparent';
+          }
+        }}
+      >
+        <span
+          aria-hidden
+          className="self-stretch w-[3px] rounded-full shrink-0"
+          style={{ background: priority.bg }}
+        />
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-[6px]">
+            {isTrackingThisCard && (
+              <span
+                aria-hidden
+                className="w-[6px] h-[6px] rounded-full shrink-0"
+                style={{
+                  background: isActive ? '#f59e0b' : '#1a1a2e',
+                  animation: 'projectRowPulse 1.4s ease-in-out infinite',
+                }}
+              />
+            )}
+            <span
+              className="font-semibold text-[13px] truncate"
+              style={{
+                color: ink,
+                textDecoration: isDone ? 'line-through' : 'none',
+              }}
+              title={task.title}
+            >
+              {task.title}
+            </span>
+          </div>
+          <div
+            className="flex items-center gap-[8px] text-[10px] mt-[2px]"
+            style={{ color: dim }}
+          >
+            <span className="font-mono uppercase tracking-wider font-bold">
+              {priority.label}
+            </span>
+            {totalSubs > 0 && (
+              <span>
+                {doneSubs}/{totalSubs} sub
+              </span>
+            )}
+            {task.due_date && (
+              <span
+                style={{
+                  color: overdue ? '#dc2626' : dim,
+                  fontWeight: overdue ? 700 : 400,
+                }}
+              >
+                {overdue ? '⚠ ' : ''}Due {fmtDueDate(task.due_date)}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <span
+          className="text-[11px] font-mono tabular-nums shrink-0 text-right"
+          style={{
+            color: invested > 0 ? ink : dim,
+            minWidth: 36,
+          }}
+          title={invested > 0 ? `Total tracked: ${fmtShort(invested)}` : 'No time logged yet'}
+        >
+          {invested > 0 ? fmtShort(invested) : '0s'}
+        </span>
+
+        <button
+          onClick={handlePlay}
+          className="w-[24px] h-[24px] rounded-full border-0 cursor-pointer flex items-center justify-center text-[10px] font-bold shrink-0"
+          style={{
+            background: isTrackingThisTask
+              ? isActive
+                ? '#fff'
+                : '#1a1a2e'
+              : isActive
+                ? 'rgba(255,255,255,0.12)'
+                : 'rgba(0,0,0,0.08)',
+            color: isTrackingThisTask
+              ? isActive
+                ? '#1a1a2e'
+                : '#fff'
+              : ink,
+          }}
+          title={isTrackingThisTask ? 'Stop timer' : 'Start tracking'}
+          aria-label={isTrackingThisTask ? 'Stop timer' : 'Start tracking'}
+        >
+          {isTrackingThisTask ? '⏸' : '▶'}
+        </button>
+      </div>
+
+      {editing && (
+        <EditTaskDrawer
+          key={task.id}
+          taskId={task.id}
+          onClose={() => setEditing(false)}
+        />
+      )}
+
+      <style>{`
+        @keyframes projectRowPulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.5; transform: scale(1.4); }
+        }
+      `}</style>
+    </>
   );
 }
 
@@ -183,11 +397,7 @@ function Stat({
   divider?: string;
 }) {
   return (
-    <div
-      style={
-        divider ? { borderLeft: `1px solid ${divider}` } : undefined
-      }
-    >
+    <div style={divider ? { borderLeft: `1px solid ${divider}` } : undefined}>
       <div
         className="text-[10px] font-mono uppercase tracking-wider"
         style={{ color: sub }}
@@ -201,8 +411,6 @@ function Stat({
   );
 }
 
-// Mean of subtask completion %. Tasks with no subtasks count as 0% (not done)
-// or 100% (done). Done tasks always count as 100% even if subtasks are partial.
 function computeProgress(tasks: TaskType[]): number {
   if (tasks.length === 0) return 0;
   const total = tasks.reduce((sum, t) => {

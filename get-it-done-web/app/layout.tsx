@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from 'next';
 import { DM_Sans } from 'next/font/google';
 import './globals.css';
 import { QuickAddBar } from '@/components/QuickAddBar';
+import { FloatingTimerPill } from '@/components/FloatingTimerPill';
+import { PresenceDetector } from '@/components/PresenceDetector';
 
 const dmSans = DM_Sans({
   subsets: ['latin'],
@@ -33,6 +35,14 @@ export default function RootLayout({
             self-guards on userId so it's a true no-op on /login and
             /auth/callback where no user is set. */}
         <QuickAddBar />
+        {/* Phase 8 — sticky timer pill. Self-guards on prefs.sticky_timer_enabled
+            and on a live session existing; suppresses on the dashboard where
+            NowTrackingBar already covers the same job. */}
+        <FloatingTimerPill />
+        {/* Phase 9 — presence detection. Headless component (renders only the
+            "👁 active" badge inside the NowTrackingBar via a portal); the work
+            happens in event listeners + a 30s tick. */}
+        <PresenceDetector />
       </body>
     </html>
   );

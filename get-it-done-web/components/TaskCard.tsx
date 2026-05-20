@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { fmtShort, fmtDueDate, getProgress, isOverdue, todayISO, tomorrowISO, whyInProgressLine } from '@/lib/utils';
 import { useStore } from '@/lib/store';
 import { useLiveTimers } from '@/lib/useLiveTimer';
@@ -113,7 +113,7 @@ export function TaskCard({ task, compact = false }: Props) {
 
   const handleDeleteSub = async (subId: string) => {
     const sub = task.subtasks.find((s) => s.id === subId);
-    if (sub && sub.total_time_seconds > 0) {
+    if (sub && sub.total_time_seconds + sub.tracked_total_seconds > 0) {
       const ok = confirm(
         `This subtask has tracked time. Delete anyway? Time entries will be kept but unlinked from the subtask.`,
       );
@@ -138,10 +138,17 @@ export function TaskCard({ task, compact = false }: Props) {
     onToggle: () => setTimerOpen((v) => !v),
   });
 
-  // Feature 2b — invested chip. Combines saved task.total_time_seconds with the
-  // live elapsed of every tracked_session currently running on this task
-  // (covers both task-level and subtask-level live timers and concurrent ones).
-  const invested = task.total_time_seconds + liveElapsedForCard;
+  // Feature 2b — invested chip. Three components:
+  //   1. Legacy `total_time_seconds` (only bumped by the old Pomodoro
+  //      save_time_session RPC).
+  //   2. `tracked_total_seconds` — sum of closed tracked_sessions, the path
+  //      the current live timer uses.
+  //   3. `liveElapsedForCard` — seconds ticking in any open session on the
+  //      task / its subtasks right now.
+  // Without (2) the chip showed "0s NEVER STARTED" on tasks that had logged
+  // hours via the live timer, since the legacy column was never updated.
+  const invested =
+    task.total_time_seconds + task.tracked_total_seconds + liveElapsedForCard;
 
   const baseShadow = '0 1px 4px rgba(0,0,0,0.06), 0 0 0 1px rgba(0,0,0,0.04)';
   const hoverShadow = '0 4px 16px rgba(0,0,0,0.13), 0 0 0 1px rgba(0,0,0,0.18)';
@@ -151,6 +158,23 @@ export function TaskCard({ task, compact = false }: Props) {
   const doneCount = task.subtasks.filter((s) => s.is_done).length;
   const incompleteSubsOnDone =
     task.effective_status === 'done' && task.subtasks.length > 0 && doneCount < task.subtasks.length;
+
+  // Phase 1.2 — "Task not recording time" warning. Ticks once a minute so the
+  // amber state appears as soon as the threshold is crossed without a refetch.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+  const warningThresholdMin = prefs?.warning_threshold_min ?? 20;
+  const minutesSinceProgress = task.last_progress_at
+    ? Math.floor((nowMs - new Date(task.last_progress_at).getTime()) / 60_000)
+    : null;
+  const isWarning =
+    task.effective_status === 'in_progress' &&
+    !isTrackingThisCard &&
+    minutesSinceProgress !== null &&
+    minutesSinceProgress >= warningThresholdMin;
 
   // Feature 2b — over-estimate visual states for the invested chip.
   let investedColor = '#888';
@@ -178,7 +202,17 @@ export function TaskCard({ task, compact = false }: Props) {
         style={{
           padding: compact ? 14 : 18,
           boxShadow: running || isTrackingThisCard ? runningShadow : baseShadow,
-          borderLeft: isTrackingThisCard ? '3px solid #1a1a2e' : '3px solid transparent',
+          // Phase 1.2 — amber left border on warning. Tracking border wins.
+          borderLeft: isTrackingThisCard
+            ? '3px solid #1a1a2e'
+            : isWarning
+              ? '3px solid #f59e0b'
+              : '3px solid transparent',
+          // Subtle amber tint on warning so it reads at a glance even with the
+          // border alone.
+          background: isWarning
+            ? 'linear-gradient(180deg, #fffbeb 0%, #fff 60%)'
+            : '#fff',
         }}
         onMouseEnter={(e) => {
           if (!running && !isTrackingThisCard)
@@ -399,10 +433,29 @@ export function TaskCard({ task, compact = false }: Props) {
               </span>
             </>
           )}
+          {/* Phase 1.2 — warning caption + inline Start tracking CTA. Renders
+              ABOVE whyInProgressLine because it's the more urgent signal:
+              a stale in-progress task is what we want the user to act on. */}
+          {isWarning && (
+            <div className="mt-[6px] flex items-center justify-between gap-2 text-[11px] text-[#92400e] font-semibold">
+              <span className="flex items-center gap-[5px]">
+                <span aria-hidden>⚠</span>
+                In Progress · no time logged in {minutesSinceProgress}m
+              </span>
+              <button
+                onClick={handleQuickPlay}
+                className="text-[11px] font-bold text-[#92400e] hover:text-[#78350f] cursor-pointer bg-transparent border-0 underline"
+                title="Start tracking this task"
+              >
+                Start tracking →
+              </button>
+            </div>
+          )}
           {/* Spec Change #1 — surface why a task is showing as In Progress.
               Status is derived from logged time; this line tells the user
-              what's behind the derivation. */}
-          {task.effective_status === 'in_progress' && (
+              what's behind the derivation. Hidden when the warning is on so
+              the warning isn't drowned out. */}
+          {task.effective_status === 'in_progress' && !isWarning && (
             <div className="text-[12px] italic text-[#6b7280] mt-[6px]">
               {whyInProgressLine(task)}
             </div>
@@ -426,12 +479,21 @@ export function TaskCard({ task, compact = false }: Props) {
               aria-hidden
             />
             <span className="text-[10px] font-mono tracking-wider text-[#666] shrink-0">
-              {task.subtasks.filter((s) => s.total_time_seconds > 0).length} of{' '}
-              {task.subtasks.length} subtask
+              {
+                task.subtasks.filter(
+                  (s) => s.total_time_seconds + s.tracked_total_seconds > 0,
+                ).length
+              }{' '}
+              of {task.subtasks.length} subtask
               {task.subtasks.length === 1 ? '' : 's'} worked
             </span>
             <span className="text-[11px] font-mono tabular-nums font-bold text-[#1a1a2e] shrink-0">
-              {fmtShort(task.subtasks.reduce((sum, s) => sum + s.total_time_seconds, 0))}
+              {fmtShort(
+                task.subtasks.reduce(
+                  (sum, s) => sum + s.total_time_seconds + s.tracked_total_seconds,
+                  0,
+                ),
+              )}
             </span>
           </div>
         )}

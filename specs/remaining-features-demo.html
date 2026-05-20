@@ -1,0 +1,589 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Get-it-done — Remaining features demo</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/lucide@latest"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #F2EEFB;
+    --bg-soft: #EBE5F7;
+    --surface: #FFFFFF;
+    --surface-2: #FAF8FE;
+    --ink: #0F1226;
+    --ink-2: #4A4E69;
+    --ink-3: #8B8FA8;
+    --line: #E8E3F4;
+    --purple: #7C5CFF;
+    --purple-soft: #E4DEFB;
+    --purple-deep: #4F37C8;
+    --red: #EF4444;
+    --red-soft: #FEE4E4;
+    --amber: #F59E0B;
+    --amber-soft: #FEF1D7;
+    --green: #10B981;
+    --green-soft: #D6F5E8;
+    --teal: #14B8A6;
+    --teal-soft: #CFF1ED;
+  }
+  html, body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--ink); }
+  .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+  .now-tracking-card {
+    background:
+      radial-gradient(120% 200% at 80% -10%, rgba(255,255,255,0.12), transparent 50%),
+      linear-gradient(110deg, #11142A 0%, #1A1F44 40%, #2A2350 60%, #15172E 100%);
+    background-size: 200% 200%;
+    animation: shimmer 14s ease infinite;
+    box-shadow: 0 18px 40px -20px rgba(20, 14, 60, 0.5), inset 0 1px 0 rgba(255,255,255,0.08);
+  }
+  @keyframes shimmer { 0%,100%{ background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 1px 0 rgba(15,18,38,0.02), 0 8px 24px -16px rgba(15,18,38,0.08); }
+  .pill { padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; display: inline-flex; align-items: center; gap: 6px; }
+  .pill-urgent { background: var(--red-soft); color: #B91C1C; }
+  .pill-high { background: var(--amber-soft); color: #B45309; }
+  .pill-med { background: #FEF3C7; color: #A16207; }
+  .pill-low { background: var(--teal-soft); color: #0F766E; }
+  .dot { width: 6px; height: 6px; border-radius: 999px; display: inline-block; }
+  .tab-btn { padding: 8px 14px; border-radius: 10px; font-size: 13px; font-weight: 500; color: var(--ink-2); display: inline-flex; align-items: center; gap: 6px; transition: all 150ms; }
+  .tab-btn:hover { color: var(--ink); background: var(--bg-soft); }
+  .tab-btn.active { background: #11142A; color: white; }
+  .task-card {
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 10px 12px;
+    cursor: grab;
+    transition: all 140ms;
+  }
+  .task-card:hover { border-color: #D8D0EE; box-shadow: 0 6px 16px -10px rgba(15,18,38,0.18); transform: translateY(-1px); }
+  .task-card.dragging { opacity: 0.4; cursor: grabbing; }
+  .col-drop { transition: all 160ms; }
+  .col-drop.drag-over { background: linear-gradient(180deg, #F8F5FE 0%, var(--surface) 60%); border-color: var(--purple); }
+  .float-timer {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 60;
+    transition: all 280ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  .float-timer.mini { transform: translateY(0) scale(0.92); }
+  .float-timer-card {
+    background:
+      radial-gradient(120% 200% at 80% -10%, rgba(255,255,255,0.14), transparent 50%),
+      linear-gradient(110deg, #11142A 0%, #1A1F44 40%, #2A2350 60%, #15172E 100%);
+    background-size: 200% 200%;
+    animation: shimmer 14s ease infinite;
+    color: white;
+    border-radius: 16px;
+    box-shadow: 0 24px 48px -20px rgba(20, 14, 60, 0.55), inset 0 1px 0 rgba(255,255,255,0.1);
+  }
+  .new-badge {
+    background: linear-gradient(135deg, #7C5CFF 0%, #B49BFF 100%);
+    color: white; padding: 2px 8px; border-radius: 6px; font-size: 9px; font-weight: 700;
+    letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  .project-pill { padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; }
+  .pp-zakir { background: #FEEDD6; color: #C2410C; }
+  .pp-allianza { background: #DDE5FF; color: #1E40AF; }
+  .pp-aiedu { background: #FCE0EE; color: #BE185D; }
+  .pp-getitdone { background: #D8F2E5; color: #047857; }
+  .pulse-dot { animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+  .stripe-tip {
+    background: linear-gradient(180deg, rgba(124,92,255,0.06), rgba(124,92,255,0));
+    border: 1px solid rgba(124,92,255,0.18);
+  }
+  .results-panel {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0; right: 0;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    box-shadow: 0 24px 48px -20px rgba(15,18,38,0.22), 0 6px 18px -12px rgba(15,18,38,0.12);
+    max-height: 380px;
+    overflow-y: auto;
+    z-index: 30;
+  }
+  .result-row { padding: 9px 12px; border-bottom: 1px solid var(--line); cursor: grab; display: flex; align-items: center; gap: 10px; }
+  .result-row:last-child { border-bottom: 0; }
+  .result-row:hover { background: var(--bg-soft); }
+  .result-row.dragging { opacity: 0.4; cursor: grabbing; }
+  .os-mock {
+    background: linear-gradient(180deg, #1E1B2E 0%, #2A2540 100%);
+    border-radius: 14px;
+    height: 320px;
+    position: relative;
+    overflow: hidden;
+    border: 1px solid #3A3550;
+  }
+  .os-window {
+    position: absolute;
+    background: var(--surface);
+    border-radius: 8px;
+    box-shadow: 0 24px 48px -16px rgba(0,0,0,0.5);
+    overflow: hidden;
+  }
+  .os-titlebar { background: #E8E3F4; padding: 6px 10px; font-size: 10px; color: var(--ink-2); display: flex; align-items: center; gap: 6px; }
+  .ios-island {
+    background: #0B0B0F;
+    color: white;
+    border-radius: 999px;
+    padding: 6px 14px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: 0 10px 24px -8px rgba(0,0,0,0.6);
+  }
+  .android-widget {
+    background: linear-gradient(110deg, #11142A 0%, #2A2350 60%, #15172E 100%);
+    color: white;
+    border-radius: 18px;
+    padding: 14px 16px;
+    box-shadow: 0 18px 40px -16px rgba(0,0,0,0.55);
+    width: 280px;
+  }
+</style>
+</head>
+<body class="min-h-screen">
+
+<!-- ====== TOP HEADER ====== -->
+<header class="sticky top-0 z-40 bg-[color:var(--bg)]/85 backdrop-blur border-b border-[color:var(--line)]">
+  <div class="max-w-[1280px] mx-auto px-6 py-3 flex items-center gap-3">
+    <div class="flex items-center gap-2 mr-2">
+      <div class="w-7 h-7 rounded-md bg-[color:var(--purple)] flex items-center justify-center">
+        <i data-lucide="zap" class="w-4 h-4 text-white" stroke-width="3"></i>
+      </div>
+      <span class="font-bold text-[15px]">Get-it-done</span>
+      <span class="text-[11px] text-[color:var(--ink-3)] ml-2">Remaining features demo</span>
+    </div>
+    <div class="flex-1"></div>
+    <a href="#feature-7" class="tab-btn"><i data-lucide="search" class="w-4 h-4"></i>Search · drag-from-results</a>
+    <a href="#feature-15" class="tab-btn"><i data-lucide="pin" class="w-4 h-4"></i>Sticky timer (true always-on-top)</a>
+  </div>
+</header>
+
+<main class="max-w-[1280px] mx-auto px-6 pt-6 pb-32">
+
+  <div class="mb-6 p-4 rounded-2xl border" style="background: linear-gradient(90deg, #E8DEFD 0%, #E0E9FF 100%); border-color: #DCD0F9;">
+    <p class="text-[12px] text-[#3B2C8C]">
+      <b>Scope:</b> this file shows ONLY the two outstanding upgrade items. 15 of the 17 features in the original brief are already shipped — see <code>specs/REMAINING-WORK.md</code> for the audit.
+    </p>
+  </div>
+
+  <!-- ========================================================== -->
+  <!-- ====== FEATURE 7 — SEARCH + DRAG-FROM-RESULTS ============ -->
+  <!-- ========================================================== -->
+  <section id="feature-7" class="mb-12">
+    <div class="flex items-end justify-between mb-4 mt-3">
+      <div>
+        <h1 class="text-[28px] font-bold tracking-tight">Search · Drag results to columns</h1>
+        <p class="text-[13px] text-[color:var(--ink-2)] max-w-[760px]">
+          Search already filters in place across every view. The remaining piece is a
+          <b>results panel</b> with draggable rows so the user can move a found task into
+          a Board column, Matrix quadrant, Today list, or Priority lane in one drop.
+        </p>
+      </div>
+      <span class="new-badge">Remaining · P1 · S</span>
+    </div>
+
+    <!-- search bar with new drag-from-results affordance -->
+    <div class="card p-3 mb-4 relative">
+      <div class="flex items-center gap-2">
+        <div class="relative flex-1">
+          <i data-lucide="search" class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[color:var(--ink-3)]"></i>
+          <input id="searchInput" oninput="renderResults()" value="loom" placeholder="Search any task across all projects…" class="pl-9 pr-3 py-2 text-[13px] rounded-lg border border-[color:var(--line)] bg-[color:var(--surface-2)] w-full outline-none focus:border-[color:var(--purple)]" />
+        </div>
+        <select class="text-[12px] rounded-lg border border-[color:var(--line)] bg-white px-3 py-2 outline-none">
+          <option>All projects</option>
+          <option>allianza-biz</option>
+          <option>zakir</option>
+          <option>get-it-done</option>
+        </select>
+        <span class="new-badge">Drag results to columns</span>
+      </div>
+
+      <!-- Results panel (sits below input) -->
+      <div class="results-panel" id="resultsPanel"></div>
+    </div>
+
+    <p class="text-[11px] text-[color:var(--ink-3)] mb-3 ml-1">↑ try dragging any row below into a column on the Board mock-up.</p>
+
+    <!-- Mini board mock-up (drop targets) -->
+    <div class="grid grid-cols-4 gap-3">
+      <!-- TO DO -->
+      <div class="card p-3 col-drop" data-drop-target="todo" ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event, 'todo')">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-[11px] font-bold tracking-[0.12em] text-[color:var(--ink-2)]">TO DO</h3>
+          <span class="text-[10px] mono text-[color:var(--ink-3)]" id="count-todo">2</span>
+        </div>
+        <div class="space-y-2" id="col-todo">
+          <div class="task-card">
+            <div class="text-[12px] font-medium mb-1.5">Send demo to Dr Azaz</div>
+            <span class="pill pill-urgent"><span class="dot" style="background:#EF4444"></span>Urgent</span>
+          </div>
+          <div class="task-card">
+            <div class="text-[12px] font-medium mb-1.5">Closing soon campaign — coach launch</div>
+            <span class="pill pill-urgent"><span class="dot" style="background:#EF4444"></span>Urgent</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- IN PROGRESS -->
+      <div class="card p-3 col-drop" data-drop-target="in_progress" ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event, 'in_progress')">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-[11px] font-bold tracking-[0.12em] text-[color:var(--ink-2)]">IN PROGRESS</h3>
+          <span class="text-[10px] mono text-[color:var(--ink-3)]" id="count-in_progress">1</span>
+        </div>
+        <div class="space-y-2" id="col-in_progress">
+          <div class="task-card">
+            <div class="text-[12px] font-medium mb-1.5">Build Gap Validator GPT</div>
+            <span class="pill pill-high"><span class="dot" style="background:#F59E0B"></span>High</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- TODAY -->
+      <div class="card p-3 col-drop" data-drop-target="today" ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event, 'today')">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-[11px] font-bold tracking-[0.12em] text-[color:var(--ink-2)]">TODAY · #N</h3>
+          <span class="text-[10px] mono text-[color:var(--ink-3)]" id="count-today">3</span>
+        </div>
+        <div class="space-y-2" id="col-today">
+          <div class="task-card">
+            <div class="text-[12px] font-medium mb-1.5">Outline Specialist Stack VSL v2</div>
+            <span class="pill pill-high"><span class="dot" style="background:#F59E0B"></span>High</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- MATRIX · DO FIRST -->
+      <div class="card p-3 col-drop" data-drop-target="do_first" ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event, 'do_first')">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-[11px] font-bold tracking-[0.12em] text-[color:var(--ink-2)]">MATRIX · DO FIRST</h3>
+          <span class="text-[10px] mono text-[color:var(--ink-3)]" id="count-do_first">4</span>
+        </div>
+        <div class="space-y-2" id="col-do_first">
+          <div class="task-card">
+            <div class="text-[12px] font-medium mb-1.5">Plan social media content for Allianza Biz</div>
+            <span class="pill pill-urgent"><span class="dot" style="background:#EF4444"></span>Urgent</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="stripe-tip rounded-xl p-3 text-[12px] text-[color:var(--ink-2)] flex items-start gap-2 mt-4">
+      <i data-lucide="lightbulb" class="w-4 h-4 text-[color:var(--purple)] mt-0.5 shrink-0"></i>
+      <span>
+        <b class="text-[color:var(--ink)]">Implementation note:</b>
+        Drops call the <i>existing</i> store mutators
+        (<code>updateTask</code>, <code>setMatrixQuadrant</code>, <code>addTaskToToday</code>).
+        No new API routes are required.
+      </span>
+    </div>
+
+    <!-- Drop notification -->
+    <div id="dropToast" class="fixed bottom-6 left-1/2 -translate-x-1/2 bg-[color:var(--ink)] text-white text-[12px] font-medium px-4 py-2 rounded-lg shadow-2xl opacity-0 pointer-events-none transition-opacity z-50"></div>
+  </section>
+
+  <!-- ========================================================== -->
+  <!-- ====== FEATURE 15 — STICKY TIMER · TRUE ALWAYS-ON-TOP ===== -->
+  <!-- ========================================================== -->
+  <section id="feature-15" class="mb-12">
+    <div class="flex items-end justify-between mb-4 mt-3">
+      <div>
+        <h1 class="text-[28px] font-bold tracking-tight">Sticky timer · true always-on-top</h1>
+        <p class="text-[13px] text-[color:var(--ink-2)] max-w-[760px]">
+          The browser-only fixed-position pill is shipped (see bottom-right of this page).
+          The remaining work is wrapping the app in a desktop shell (Tauri recommended)
+          so the timer floats above other applications, plus Android lock-screen widget
+          and iOS Live Activity for mobile.
+        </p>
+      </div>
+      <span class="new-badge">Remaining · P2 · M</span>
+    </div>
+
+    <!-- 3 mock surfaces side by side -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+
+      <!-- 15a · Desktop shell (Tauri/Electron) -->
+      <div class="card p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-[13px] font-bold flex items-center gap-2"><i data-lucide="monitor" class="w-4 h-4 text-[color:var(--purple)]"></i>15a · Desktop always-on-top</h3>
+          <span class="text-[10px] font-bold tracking-wider text-[color:var(--ink-3)]">TAURI / ELECTRON</span>
+        </div>
+        <p class="text-[11px] text-[color:var(--ink-3)] mb-3">A separate decorationless OS window pinned above every other app — Slack, browser, IDE.</p>
+
+        <div class="os-mock">
+          <!-- mock OS background: another app in focus -->
+          <div class="os-window" style="top:18px; left:18px; width:78%; height:84%;">
+            <div class="os-titlebar"><span class="w-2.5 h-2.5 rounded-full bg-red-400"></span><span class="w-2.5 h-2.5 rounded-full bg-amber-400"></span><span class="w-2.5 h-2.5 rounded-full bg-green-400"></span><span class="ml-2">Slack — #general</span></div>
+            <div class="p-3 text-[10px] text-[color:var(--ink-3)] leading-relaxed">
+              Komal · 11:24<br/>
+              <span class="text-[color:var(--ink-2)]">"can we ship feature 7 today?"</span><br/><br/>
+              Komal · 11:25<br/>
+              <span class="text-[color:var(--ink-2)]">"already done — testing now"</span>
+            </div>
+          </div>
+          <!-- the floating timer pinned on top -->
+          <div class="float-timer-card px-3 py-2 flex items-center gap-2" style="position:absolute; top:14px; right:14px; min-width: 240px;">
+            <span class="w-1.5 h-1.5 rounded-full bg-red-400 pulse-dot"></span>
+            <div class="flex flex-col">
+              <span class="text-[8px] font-bold tracking-[0.18em] opacity-70">PINNED</span>
+              <span class="text-[10px] opacity-90 leading-tight">LinkTree for RojaFume</span>
+            </div>
+            <span class="mono text-[14px] font-bold ml-auto">1:04:47</span>
+            <button class="w-5 h-5 rounded-md bg-white/10 hover:bg-white/20 flex items-center justify-center"><i data-lucide="pause" class="w-2.5 h-2.5"></i></button>
+          </div>
+        </div>
+
+        <ul class="text-[11px] text-[color:var(--ink-2)] space-y-1 mt-3">
+          <li>· <code>always_on_top: true</code></li>
+          <li>· <code>decorations: false</code></li>
+          <li>· <code>skip_taskbar: true</code></li>
+          <li>· shares Zustand store w/ main window</li>
+        </ul>
+      </div>
+
+      <!-- 15b · iOS Live Activity -->
+      <div class="card p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-[13px] font-bold flex items-center gap-2"><i data-lucide="smartphone" class="w-4 h-4 text-[color:var(--purple)]"></i>15b · iOS Live Activity</h3>
+          <span class="text-[10px] font-bold tracking-wider text-[color:var(--ink-3)]">ACTIVITYKIT</span>
+        </div>
+        <p class="text-[11px] text-[color:var(--ink-3)] mb-3">Dynamic Island + lock-screen widget showing the active session for as long as it's running.</p>
+
+        <div class="rounded-2xl py-6 px-3 flex flex-col items-center justify-center" style="background: linear-gradient(180deg, #1A1B2E 0%, #2A2540 100%); height: 200px;">
+          <div class="ios-island">
+            <span class="w-1.5 h-1.5 rounded-full bg-red-400 pulse-dot"></span>
+            <span class="text-[10px] font-semibold">LinkTree</span>
+            <span class="mono text-[10px] opacity-80">1:04</span>
+            <i data-lucide="pause" class="w-3 h-3 opacity-70"></i>
+          </div>
+          <p class="text-[9px] text-white/50 mt-3">Dynamic Island · active for session duration</p>
+        </div>
+
+        <ul class="text-[11px] text-[color:var(--ink-2)] space-y-1 mt-3">
+          <li>· starts when timer starts</li>
+          <li>· ends when session stops</li>
+          <li>· tap → opens app to that task</li>
+        </ul>
+      </div>
+
+      <!-- 15c · Android widget -->
+      <div class="card p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-[13px] font-bold flex items-center gap-2"><i data-lucide="smartphone" class="w-4 h-4 text-[color:var(--purple)]"></i>15c · Android lock-screen widget</h3>
+          <span class="text-[10px] font-bold tracking-wider text-[color:var(--ink-3)]">SERVICE + APPWIDGET</span>
+        </div>
+        <p class="text-[11px] text-[color:var(--ink-3)] mb-3">Foreground notification + home/lock-screen widget. Tap pause/stop without unlocking.</p>
+
+        <div class="rounded-2xl p-4 flex items-center justify-center" style="background: linear-gradient(180deg, #2A2540 0%, #11142A 100%); height: 200px;">
+          <div class="android-widget">
+            <div class="flex items-center gap-1.5 mb-1">
+              <span class="w-1.5 h-1.5 rounded-full bg-red-400 pulse-dot"></span>
+              <span class="text-[9px] font-bold tracking-[0.18em] opacity-70">NOW TRACKING</span>
+            </div>
+            <div class="text-[12px] font-medium mb-2">LinkTree URL for RojaFume</div>
+            <div class="flex items-center gap-2">
+              <span class="mono text-[18px] font-bold">1:04:47</span>
+              <button class="ml-auto w-7 h-7 rounded-md bg-white/10 flex items-center justify-center"><i data-lucide="pause" class="w-3.5 h-3.5"></i></button>
+              <button class="w-7 h-7 rounded-md bg-white/10 flex items-center justify-center"><i data-lucide="square" class="w-3.5 h-3.5"></i></button>
+            </div>
+          </div>
+        </div>
+
+        <ul class="text-[11px] text-[color:var(--ink-2)] space-y-1 mt-3">
+          <li>· foreground <code>Service</code></li>
+          <li>· updates ≥ every 30 s</li>
+          <li>· pause / stop without unlock</li>
+        </ul>
+      </div>
+
+    </div>
+
+    <!-- Settings additions -->
+    <div class="card p-4">
+      <h3 class="text-[13px] font-bold mb-2">Settings additions (on top of <code>sticky_timer_enabled</code> + <code>sticky_timer_position</code>)</h3>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
+        <label class="flex items-center justify-between p-3 rounded-lg border border-[color:var(--line)]">
+          <div>
+            <div class="text-[13px] font-semibold">Auto-hide when no active timer</div>
+            <div class="text-[11px] text-[color:var(--ink-3)] mt-0.5"><code>sticky_timer_auto_hide</code> · default ON</div>
+          </div>
+          <div class="w-10 h-6 bg-[color:var(--purple)] rounded-full relative">
+            <div class="absolute top-0.5 right-0.5 w-5 h-5 bg-white rounded-full"></div>
+          </div>
+        </label>
+        <label class="flex items-center justify-between p-3 rounded-lg border border-[color:var(--line)]">
+          <div>
+            <div class="text-[13px] font-semibold">Lock-screen widget (mobile)</div>
+            <div class="text-[11px] text-[color:var(--ink-3)] mt-0.5"><code>lockscreen_widget_enabled</code> · default OFF</div>
+          </div>
+          <div class="w-10 h-6 bg-gray-200 rounded-full relative">
+            <div class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full"></div>
+          </div>
+        </label>
+      </div>
+    </div>
+
+    <div class="stripe-tip rounded-xl p-3 text-[12px] text-[color:var(--ink-2)] flex items-start gap-2 mt-4">
+      <i data-lucide="lightbulb" class="w-4 h-4 text-[color:var(--purple)] mt-0.5 shrink-0"></i>
+      <span>
+        <b class="text-[color:var(--ink)]">The pill at the bottom-right of this page</b> is the
+        currently-shipped browser-only version. The remaining work is making that <i>same</i>
+        component render in a separate OS window via Tauri so it stays on top when you switch
+        to Slack / your IDE.
+      </span>
+    </div>
+  </section>
+
+</main>
+
+<!-- ====== EXISTING BROWSER-ONLY STICKY TIMER (already shipped) ====== -->
+<div class="float-timer" id="floatTimer">
+  <div class="float-timer-card px-4 py-3 flex items-center gap-3 min-w-[280px]">
+    <div class="flex flex-col">
+      <div class="flex items-center gap-1.5">
+        <span class="w-1.5 h-1.5 rounded-full bg-red-400 pulse-dot"></span>
+        <span class="text-[9px] font-bold tracking-[0.18em] opacity-80">SHIPPED · IN-TAB ONLY</span>
+      </div>
+      <span class="text-[11px] opacity-80 mt-0.5">LinkTree URL for RojaFume</span>
+    </div>
+    <span class="mono text-[18px] font-bold ml-auto" id="floatTime">1:04:47</span>
+    <button class="w-7 h-7 rounded-md bg-white/10 hover:bg-white/20 flex items-center justify-center"><i data-lucide="pause" class="w-3.5 h-3.5"></i></button>
+    <button onclick="toggleFloat()" class="w-7 h-7 rounded-md bg-white/10 hover:bg-white/20 flex items-center justify-center"><i data-lucide="minimize-2" class="w-3.5 h-3.5"></i></button>
+  </div>
+  <p class="text-[10px] text-[color:var(--ink-3)] mt-1.5 ml-1">Needs Tauri shell for true always-on-top <span class="new-badge ml-1">Remaining</span></p>
+</div>
+
+<script>
+  // ============= DATA =============
+  const PROJECT_LABELS = {
+    zakir: { name: 'zakir', cls: 'pp-zakir' },
+    allianza: { name: 'allianza-biz', cls: 'pp-allianza' },
+    aiedu: { name: 'AI Education', cls: 'pp-aiedu' },
+    getitdone: { name: 'get-it-done', cls: 'pp-getitdone' },
+  };
+  const PRIORITY_PILL = {
+    urgent: { cls: 'pill-urgent', label: 'Urgent', color: '#EF4444' },
+    high: { cls: 'pill-high', label: 'High', color: '#F59E0B' },
+    med: { cls: 'pill-med', label: 'Med', color: '#EAB308' },
+    low: { cls: 'pill-low', label: 'Low', color: '#14B8A6' },
+  };
+  const searchPool = [
+    { id: 'r1', title: 'Record 1–2 reusable Loom templates', priority: 'urgent', project: 'allianza', est: '~120m' },
+    { id: 'r2', title: 'Loom walkthrough of new dashboard for Zakir', priority: 'high', project: 'zakir', est: '~45m' },
+    { id: 'r3', title: 'Edit demo Loom: Allianza onboarding flow', priority: 'med', project: 'allianza', est: '~30m' },
+    { id: 'r4', title: 'Reply to Loom feedback from Dr Azaz', priority: 'med', project: 'allianza' },
+    { id: 'r5', title: 'Lessons learned — last Loom batch', priority: 'low', project: 'aiedu', est: '~20m' },
+  ];
+
+  // ============= SEARCH RESULTS =============
+  function renderResults() {
+    const q = (document.getElementById('searchInput').value || '').toLowerCase().trim();
+    const panel = document.getElementById('resultsPanel');
+    if (!q) { panel.innerHTML = ''; panel.style.display = 'none'; return; }
+    const matches = searchPool.filter(t => t.title.toLowerCase().includes(q));
+    if (matches.length === 0) {
+      panel.innerHTML = `<p class="px-4 py-6 text-center text-[12px] text-[color:var(--ink-3)] italic">No tasks match "${q}".</p>`;
+      panel.style.display = 'block';
+      return;
+    }
+    panel.innerHTML = matches.map(t => {
+      const p = PRIORITY_PILL[t.priority];
+      const pr = PROJECT_LABELS[t.project];
+      return `
+        <div class="result-row" draggable="true" data-id="${t.id}" data-title="${t.title}" data-priority="${t.priority}" data-project="${t.project}" ondragstart="onResultDragStart(event)" ondragend="onResultDragEnd(event)">
+          <div class="flex-1">
+            <div class="text-[12.5px] font-medium mb-1">${t.title}</div>
+            <div class="flex items-center gap-1.5">
+              <span class="pill ${p.cls}"><span class="dot" style="background:${p.color}"></span>${p.label}</span>
+              <span class="project-pill ${pr.cls}">${pr.name}</span>
+              ${t.est ? `<span class="text-[10px] text-[color:var(--ink-3)] mono ml-auto">${t.est}</span>` : ''}
+            </div>
+          </div>
+          <i data-lucide="grip-vertical" class="w-4 h-4 text-[color:var(--ink-3)]"></i>
+        </div>
+      `;
+    }).join('');
+    panel.style.display = 'block';
+    lucide.createIcons();
+  }
+
+  // ============= DRAG / DROP =============
+  let dragData = null;
+
+  function onResultDragStart(e) {
+    const row = e.currentTarget;
+    dragData = {
+      id: row.dataset.id,
+      title: row.dataset.title,
+      priority: row.dataset.priority,
+      project: row.dataset.project,
+    };
+    row.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', row.dataset.id);
+  }
+  function onResultDragEnd(e) { e.currentTarget.classList.remove('dragging'); dragData = null; }
+
+  function onDragOver(e) { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }
+  function onDragLeave(e) { e.currentTarget.classList.remove('drag-over'); }
+  function onDrop(e, target) {
+    e.preventDefault();
+    e.currentTarget.classList.remove('drag-over');
+    if (!dragData) return;
+    const p = PRIORITY_PILL[dragData.priority];
+    const pr = PROJECT_LABELS[dragData.project];
+    const col = document.getElementById('col-' + target);
+    const card = document.createElement('div');
+    card.className = 'task-card';
+    card.innerHTML = `
+      <div class="text-[12px] font-medium mb-1.5">${dragData.title}</div>
+      <div class="flex items-center gap-1.5">
+        <span class="pill ${p.cls}"><span class="dot" style="background:${p.color}"></span>${p.label}</span>
+        <span class="project-pill ${pr.cls}">${pr.name}</span>
+      </div>
+    `;
+    col.appendChild(card);
+    const cEl = document.getElementById('count-' + target);
+    if (cEl) cEl.textContent = (parseInt(cEl.textContent, 10) || 0) + 1;
+    // remove from results panel
+    const row = document.querySelector(`.result-row[data-id="${dragData.id}"]`);
+    if (row) row.remove();
+    showDropToast(`Dropped on ${target.replace('_',' ').toUpperCase()} — would call store mutator`);
+  }
+
+  function showDropToast(msg) {
+    const t = document.getElementById('dropToast');
+    t.textContent = msg;
+    t.style.opacity = '1';
+    clearTimeout(window._toast);
+    window._toast = setTimeout(() => { t.style.opacity = '0'; }, 1800);
+  }
+
+  // ============= FLOAT TIMER (mock tick) =============
+  function toggleFloat() { document.getElementById('floatTimer').classList.toggle('mini'); }
+  let sec = 3887;
+  setInterval(() => {
+    sec += 1;
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    const txt = `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    document.getElementById('floatTime').textContent = txt;
+  }, 1000);
+
+  // ============= INIT =============
+  renderResults();
+  lucide.createIcons();
+</script>
+
+</body>
+</html>

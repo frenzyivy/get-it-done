@@ -23,12 +23,39 @@ export function TimelineView() {
   const prefs = useStore((s) => s.prefs);
   const updatePrefs = useStore((s) => s.updatePrefs);
 
-  const dayStart = useMemo(() => {
+  // Selected day for the Gantt. Defaults to today; user can step backward to
+  // edit / backfill past days via the date nav above the Gantt.
+  const [dayStartMs, setDayStartMs] = useState<number>(() => {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
-    return d;
+    return d.getTime();
+  });
+  const dayStart = useMemo(() => new Date(dayStartMs), [dayStartMs]);
+  const dayEnd = useMemo(() => new Date(dayStartMs + DAY_MS), [dayStartMs]);
+
+  const todayMidnightMs = useMemo(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
   }, []);
-  const dayEnd = useMemo(() => new Date(dayStart.getTime() + DAY_MS), [dayStart]);
+  const isToday = dayStartMs === todayMidnightMs;
+  const isFutureDay = dayStartMs > todayMidnightMs;
+
+  const goPrevDay = () => setDayStartMs((ms) => ms - DAY_MS);
+  const goNextDay = () => setDayStartMs((ms) => ms + DAY_MS);
+  const goToday = () => setDayStartMs(todayMidnightMs);
+  const setFromInput = (yyyyMmDd: string) => {
+    if (!yyyyMmDd) return;
+    const [y, m, d] = yyyyMmDd.split('-').map(Number);
+    if (!y || !m || !d) return;
+    const dt = new Date(y, m - 1, d);
+    dt.setHours(0, 0, 0, 0);
+    setDayStartMs(dt.getTime());
+  };
+  const dateInputValue = useMemo(() => {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${dayStart.getFullYear()}-${pad(dayStart.getMonth() + 1)}-${pad(dayStart.getDate())}`;
+  }, [dayStart]);
 
   // Week window: Sunday 00:00 local → following Sunday 00:00 local.
   const weekStart = useMemo(() => {
@@ -197,9 +224,110 @@ export function TimelineView() {
     month: 'short',
   })}`;
 
+  const dayLabel = dayStart.toLocaleDateString('en-IN', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'short',
+  });
+
   return (
     <div className="flex flex-col gap-4">
       <DailySummaryCard />
+
+      {/* Date nav — switch the Gantt to any past day so sessions can be
+          edited / added retroactively. Keyboard: ‹ / › arrows, "Today" jumps
+          back. Future days are still browsable (e.g. to pre-log a session)
+          but flagged so the UI doesn't claim it as "today". */}
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="inline-flex items-center gap-1 rounded-full border border-[#e5e7eb] bg-white px-1 py-0.5">
+          <button
+            type="button"
+            onClick={goPrevDay}
+            aria-label="Previous day"
+            className="flex h-7 w-7 items-center justify-center rounded-full text-[#6b7280] hover:bg-[#f3f4f6] cursor-pointer border-0 bg-transparent"
+          >
+            ‹
+          </button>
+          <span className="px-2 text-[12px] font-semibold text-[#1a1a2e] tabular-nums">
+            {dayLabel}
+            {isToday && (
+              <span className="ml-1 text-[10px] font-extrabold uppercase text-[#10b981]">
+                · today
+              </span>
+            )}
+            {isFutureDay && (
+              <span className="ml-1 text-[10px] font-extrabold uppercase text-[#a855f7]">
+                · future
+              </span>
+            )}
+          </span>
+          <button
+            type="button"
+            onClick={goNextDay}
+            aria-label="Next day"
+            className="flex h-7 w-7 items-center justify-center rounded-full text-[#6b7280] hover:bg-[#f3f4f6] cursor-pointer border-0 bg-transparent"
+          >
+            ›
+          </button>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="date"
+            value={dateInputValue}
+            onChange={(e) => setFromInput(e.target.value)}
+            className="rounded-full border border-[#e5e7eb] bg-white px-3 py-1 text-[12px] font-semibold text-[#1a1a2e] hover:bg-[#f3f4f6] cursor-pointer"
+            aria-label="Pick a date"
+          />
+          {!isToday && (
+            <button
+              type="button"
+              onClick={goToday}
+              className="rounded-full border border-[#e5e7eb] bg-white px-3 py-1 text-[12px] font-semibold text-[#1a1a2e] hover:bg-[#f3f4f6] cursor-pointer"
+            >
+              Today
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Phase 4 — retroactive-edit banner. Past days warn the user that
+          edits will be audited; future days warn that tracked rows can't be
+          backfilled forward in time. */}
+      {!isToday && (
+        <div
+          className="mb-3 rounded-[10px] px-3 py-2 text-[12px] flex items-start gap-2"
+          style={
+            isFutureDay
+              ? {
+                  background: '#ecfdf5',
+                  border: '1px solid #a7f3d0',
+                  color: '#065f46',
+                }
+              : {
+                  background: '#fef3c7',
+                  border: '1px solid #fcd34d',
+                  color: '#78350f',
+                }
+          }
+        >
+          <span aria-hidden>{isFutureDay ? '🗓' : '🕰'}</span>
+          <span>
+            {isFutureDay ? (
+              <>
+                <b>Viewing a future day.</b> You can add{' '}
+                <i>planned</i> blocks here, but tracked sessions and breaks
+                are for past/today only.
+              </>
+            ) : (
+              <>
+                <b>Viewing a past day.</b> Edits will be flagged as{' '}
+                <b>manually entered</b> — Insights (Honest Score) knows the
+                difference between auto-tracked and edited data.
+              </>
+            )}
+          </span>
+        </div>
+      )}
 
       <TimelineGantt
         dayStart={dayStart}
@@ -298,7 +426,8 @@ export function TimelineView() {
       {todayWorkItems.length > 0 && (
         <div className="mt-4">
           <div className="text-[11px] font-extrabold uppercase tracking-[0.5px] text-[#888] mb-2">
-            Worked on today · {fmtShort(todayTotalSeconds)} total
+            {isToday ? 'Worked on today' : `Worked on ${dayLabel}`} ·{' '}
+            {fmtShort(todayTotalSeconds)} total
           </div>
           <div className="flex flex-col gap-2">
             {todayWorkItems.map((item) => {

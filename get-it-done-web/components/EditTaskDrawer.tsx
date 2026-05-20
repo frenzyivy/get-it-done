@@ -116,7 +116,7 @@ export function EditTaskDrawer({ taskId, onClose }: Props) {
   };
 
   const handleDeleteSub = async (sub: SubtaskType) => {
-    if (sub.total_time_seconds > 0) {
+    if (sub.total_time_seconds + sub.tracked_total_seconds > 0) {
       const ok = confirm(
         `This subtask has tracked time. Delete anyway? Time entries will be kept but unlinked from the subtask.`,
       );

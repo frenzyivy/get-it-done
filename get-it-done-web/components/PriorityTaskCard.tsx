@@ -127,7 +127,7 @@ export function PriorityTaskCard({ task }: Props) {
 
   const handleDeleteSub = async (subId: string) => {
     const sub = task.subtasks.find((s) => s.id === subId);
-    if (sub && sub.total_time_seconds > 0) {
+    if (sub && sub.total_time_seconds + sub.tracked_total_seconds > 0) {
       const ok = confirm(
         `This subtask has tracked time. Delete anyway? Time entries will be kept but unlinked from the subtask.`,
       );
@@ -151,7 +151,8 @@ export function PriorityTaskCard({ task }: Props) {
     onToggle: () => setTimerOpen((v) => !v),
   });
 
-  const invested = task.total_time_seconds + liveElapsedForCard;
+  const invested =
+    task.total_time_seconds + task.tracked_total_seconds + liveElapsedForCard;
 
   const baseShadow = '0 1px 4px rgba(0,0,0,0.06), 0 0 0 1px rgba(0,0,0,0.04)';
   const hoverShadow = '0 4px 16px rgba(0,0,0,0.13), 0 0 0 1px rgba(0,0,0,0.18)';
@@ -305,37 +306,37 @@ export function PriorityTaskCard({ task }: Props) {
           )}
         </div>
 
-        {/* Row 3 — footer */}
+        {/* Row 3 — footer. Hide the time chip entirely when nothing has been
+            logged (the "0s" label was misleading — a static "0s" can sit next
+            to a card that's actively running until the live counter ticks). */}
         <div className="flex items-center justify-between mt-[10px] gap-2">
           <div className="flex items-center gap-2 min-w-0">
-            <span
-              className="font-mono tabular-nums text-[11px] font-semibold flex items-center gap-[5px] whitespace-nowrap"
-              style={{
-                color: invested > 0 ? investedColor : '#9ca3af',
-                background: investedBg,
-                padding: investedBg !== 'transparent' ? '1px 6px' : 0,
-                borderRadius: 4,
-              }}
-              title={
-                invested > 0
-                  ? `Total tracked: ${fmtShort(invested)}`
-                  : 'No time logged yet'
-              }
-            >
-              {isTrackingThisCard && (
-                <span
-                  className="w-[6px] h-[6px] rounded-full bg-[#1a1a2e]"
-                  style={{
-                    animation: 'priorityCardPulse 1.4s ease-in-out infinite',
-                  }}
-                  aria-hidden
-                />
-              )}
-              {invested > 0 ? fmtShort(invested) : '0s'}
-            </span>
+            {(invested > 0 || isTrackingThisCard) && (
+              <span
+                className="font-mono tabular-nums text-[11px] font-semibold flex items-center gap-[5px] whitespace-nowrap"
+                style={{
+                  color: investedColor,
+                  background: investedBg,
+                  padding: investedBg !== 'transparent' ? '1px 6px' : 0,
+                  borderRadius: 4,
+                }}
+                title={`Total tracked: ${fmtShort(invested)}`}
+              >
+                {isTrackingThisCard && (
+                  <span
+                    className="w-[6px] h-[6px] rounded-full bg-[#1a1a2e]"
+                    style={{
+                      animation: 'priorityCardPulse 1.4s ease-in-out infinite',
+                    }}
+                    aria-hidden
+                  />
+                )}
+                {fmtShort(invested)}
+              </span>
+            )}
             {task.estimated_seconds && task.estimated_seconds > 0 ? (
               <span className="text-[11px] font-medium text-[#9ca3af] whitespace-nowrap">
-                · est {fmtShort(task.estimated_seconds)}
+                {invested > 0 || isTrackingThisCard ? '· ' : ''}est {fmtShort(task.estimated_seconds)}
               </span>
             ) : null}
           </div>
@@ -398,12 +399,21 @@ export function PriorityTaskCard({ task }: Props) {
               aria-hidden
             />
             <span className="text-[11px] font-medium text-[#6b7280] shrink-0">
-              {task.subtasks.filter((s) => s.total_time_seconds > 0).length} of{' '}
-              {task.subtasks.length} subtask
+              {
+                task.subtasks.filter(
+                  (s) => s.total_time_seconds + s.tracked_total_seconds > 0,
+                ).length
+              }{' '}
+              of {task.subtasks.length} subtask
               {task.subtasks.length === 1 ? '' : 's'} worked
             </span>
             <span className="text-[11px] font-mono tabular-nums font-semibold text-[#1a1a2e] shrink-0">
-              {fmtShort(task.subtasks.reduce((sum, s) => sum + s.total_time_seconds, 0))}
+              {fmtShort(
+                task.subtasks.reduce(
+                  (sum, s) => sum + s.total_time_seconds + s.tracked_total_seconds,
+                  0,
+                ),
+              )}
             </span>
           </div>
         )}

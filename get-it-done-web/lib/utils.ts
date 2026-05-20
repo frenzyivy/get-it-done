@@ -25,16 +25,18 @@ export function getProgress(subtasks: SubtaskType[] | undefined): number {
 }
 
 // Spec Change #1 — the italic "why is this here?" line under in-progress
-// task cards. Reads from the task's snapshot fields; doesn't need active
-// session info because total_time_seconds is the persisted truth.
+// task cards. Sums the legacy Pomodoro column with the closed-tracked_sessions
+// rollup so live-timer time also counts as "logged".
 export function whyInProgressLine(task: TaskType): string {
-  const subsWithTime = task.subtasks.filter((s) => s.total_time_seconds > 0).length;
+  const subTime = (s: SubtaskType) => s.total_time_seconds + s.tracked_total_seconds;
+  const subsWithTime = task.subtasks.filter((s) => subTime(s) > 0).length;
   if (task.subtasks.length > 0 && subsWithTime > 0) {
     return `↳ In Progress — ${subsWithTime} of ${task.subtasks.length} subtask${
       task.subtasks.length === 1 ? '' : 's'
     } ha${subsWithTime === 1 ? 's' : 've'} time logged`;
   }
-  return `↳ In Progress — ${fmtShort(task.total_time_seconds)} of work logged on this task`;
+  const taskTime = task.total_time_seconds + task.tracked_total_seconds;
+  return `↳ In Progress — ${fmtShort(taskTime)} of work logged on this task`;
 }
 
 export function fmtDueDate(iso: string): string {

@@ -91,6 +91,8 @@ export function ScheduleView() {
   const fetchDayStats = useStore((s) => s.fetchDayStats);
   const liveElapsedById = useLiveTimers();
   const tags = useStore((s) => s.tags);
+  const projects = useStore((s) => s.projects);
+  const categories = useStore((s) => s.categories);
   const userId = useStore((s) => s.userId);
   const activeSessions = useStore((s) => s.activeSessions);
   const snapMode = useStore((s) => s.prefs?.schedule_snap_mode ?? 'hour');
@@ -168,19 +170,34 @@ export function ScheduleView() {
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
-  // Sidebar status filter — local, in-memory, defaults to "open" each load.
-  // Replaces the global search input that used to live here; the global
-  // `searchQuery` store slice still drives Board/List/Priority.
-  const [sidebarStatus, setSidebarStatus] = useState<'open' | 'done' | 'all'>('open');
-  const sidebarTasks = useMemo(
-    () =>
-      tasks.filter((t) => {
-        if (sidebarStatus === 'open') return t.effective_status !== 'done';
-        if (sidebarStatus === 'done') return t.effective_status === 'done';
-        return true;
-      }),
-    [tasks, sidebarStatus],
-  );
+  // Sidebar filters — local, in-memory. Completed tasks are *never* shown in
+  // the picker (this is a planning surface — done work has no business being
+  // dragged onto a future hour). Search + project + category compose with AND.
+  const [sidebarSearch, setSidebarSearch] = useState('');
+  const [sidebarProjectIds, setSidebarProjectIds] = useState<string[]>([]);
+  const [sidebarCategoryIds, setSidebarCategoryIds] = useState<string[]>([]);
+  const sidebarTasks = useMemo(() => {
+    const q = sidebarSearch.trim().toLowerCase();
+    return tasks.filter((t) => {
+      if (t.effective_status === 'done') return false;
+      if (sidebarProjectIds.length > 0) {
+        if (!t.project_ids.some((id) => sidebarProjectIds.includes(id))) return false;
+      }
+      if (sidebarCategoryIds.length > 0) {
+        if (!t.category_ids.some((id) => sidebarCategoryIds.includes(id))) return false;
+      }
+      if (q) {
+        const inTitle = t.title.toLowerCase().includes(q);
+        const inSubs = t.subtasks.some((s) => s.title.toLowerCase().includes(q));
+        if (!inTitle && !inSubs) return false;
+      }
+      return true;
+    });
+  }, [tasks, sidebarSearch, sidebarProjectIds, sidebarCategoryIds]);
+  const sidebarFiltersActive =
+    sidebarSearch.trim().length > 0 ||
+    sidebarProjectIds.length > 0 ||
+    sidebarCategoryIds.length > 0;
 
   const blocksByHour = useMemo(() => {
     const m = new Map<number, PlannedBlock[]>();
@@ -378,7 +395,7 @@ export function ScheduleView() {
   return (
     <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
       {tabStrip}
-      <div className="grid grid-cols-[1fr_240px] gap-4">
+      <div className="grid grid-cols-[1fr_320px] gap-4">
         <div
           className="rounded-[14px] overflow-hidden"
           style={{ background: '#fff', border: '1px solid #e5e7eb' }}
@@ -499,17 +516,45 @@ export function ScheduleView() {
           <div className="text-[10px] font-mono uppercase tracking-[1px] text-[#9ca3af] mb-2">
             Drag a task →
           </div>
-          <div className="mb-2">
-            <SidebarStatusFilter value={sidebarStatus} onChange={setSidebarStatus} />
+          <div className="mb-2 flex flex-col gap-2">
+            <SidebarSearchInput value={sidebarSearch} onChange={setSidebarSearch} />
+            <SidebarMultiSelect
+              label="Project"
+              emptyLabel="All projects"
+              options={projects.map((p) => ({ id: p.id, name: p.name, color: p.color }))}
+              selectedIds={sidebarProjectIds}
+              onChange={setSidebarProjectIds}
+            />
+            <SidebarMultiSelect
+              label="Category"
+              emptyLabel="All categories"
+              options={categories.map((c) => ({ id: c.id, name: c.name, color: c.color }))}
+              selectedIds={sidebarCategoryIds}
+              onChange={setSidebarCategoryIds}
+            />
+            {sidebarFiltersActive && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSidebarSearch('');
+                  setSidebarProjectIds([]);
+                  setSidebarCategoryIds([]);
+                }}
+                className="self-start text-[11px] text-[#888] underline cursor-pointer bg-transparent border-0 hover:text-[#1a1a2e]"
+              >
+                clear filters
+              </button>
+            )}
+            <div className="text-[10px] font-mono text-[#9ca3af] tabular-nums">
+              {sidebarTasks.length} {sidebarTasks.length === 1 ? 'task' : 'tasks'}
+            </div>
           </div>
-          <div className="flex flex-col gap-[6px] max-h-[calc(100vh-200px)] overflow-y-auto">
+          <div className="flex flex-col gap-[6px] max-h-[calc(100vh-260px)] overflow-y-auto">
             {sidebarTasks.length === 0 && (
               <div className="text-[12px] text-[#9ca3af] py-4 text-center">
-                {sidebarStatus === 'done'
-                  ? 'No completed tasks yet.'
-                  : sidebarStatus === 'open'
-                    ? 'No open tasks. Add one on the Board.'
-                    : 'No tasks. Add one on the Board.'}
+                {sidebarFiltersActive
+                  ? 'No tasks match these filters.'
+                  : 'No open tasks. Add one on the Board.'}
               </div>
             )}
             {sidebarTasks.map((t) => (
@@ -567,38 +612,165 @@ function SnapToggle({
   );
 }
 
-function SidebarStatusFilter({
+// Tiny status pill shown next to the task title in the schedule sidebar.
+// Renders "TO DO" (grey) or "IN PROGRESS" (amber). Done tasks never reach
+// the sidebar (filtered upstream), so this only handles the two open states.
+function StatusPill({ status }: { status: 'todo' | 'in_progress' | 'done' }) {
+  if (status === 'done') return null;
+  const isInProgress = status === 'in_progress';
+  return (
+    <span
+      className="shrink-0 text-[9px] font-mono font-bold uppercase tracking-[0.5px] px-[5px] py-[1px] rounded-[4px] whitespace-nowrap mt-[1px]"
+      style={{
+        background: isInProgress ? '#fef3c7' : '#f3f4f6',
+        color: isInProgress ? '#92400e' : '#6b7280',
+      }}
+      title={isInProgress ? 'In progress' : 'To do'}
+    >
+      {isInProgress ? 'In progress' : 'To do'}
+    </span>
+  );
+}
+
+function SidebarSearchInput({
   value,
   onChange,
 }: {
-  value: 'open' | 'done' | 'all';
-  onChange: (v: 'open' | 'done' | 'all') => void;
+  value: string;
+  onChange: (v: string) => void;
 }) {
-  const opts: { key: 'open' | 'done' | 'all'; label: string }[] = [
-    { key: 'open', label: 'Open' },
-    { key: 'done', label: 'Done' },
-    { key: 'all', label: 'All' },
-  ];
   return (
-    <div className="flex items-center rounded-md overflow-hidden border border-[#e5e7eb] w-full">
-      {opts.map((o) => {
-        const active = value === o.key;
-        return (
-          <button
-            key={o.key}
-            type="button"
-            onClick={() => onChange(o.key)}
-            title={`Show ${o.label.toLowerCase()} tasks`}
-            className="flex-1 text-[10px] font-mono uppercase tracking-[1px] px-2 py-[5px] cursor-pointer border-0"
-            style={{
-              background: active ? '#1a1a2e' : 'transparent',
-              color: active ? '#fff' : '#71717a',
-            }}
-          >
-            {o.label}
-          </button>
-        );
-      })}
+    <div className="relative">
+      <span
+        aria-hidden
+        className="absolute left-2 top-1/2 -translate-y-1/2 text-[#9ca3af] text-[12px] pointer-events-none"
+      >
+        🔍
+      </span>
+      <input
+        type="search"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="Search tasks…"
+        className="w-full text-[12px] pl-7 pr-7 py-[6px] rounded-md border border-[#e5e7eb] bg-white text-[#1a1a2e] outline-none focus:border-[#1a1a2e] placeholder:text-[#9ca3af]"
+        aria-label="Search tasks in sidebar"
+      />
+      {value && (
+        <button
+          type="button"
+          onClick={() => onChange('')}
+          className="absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full text-[#9ca3af] hover:text-[#1a1a2e] hover:bg-[rgba(0,0,0,0.05)] border-0 bg-transparent cursor-pointer text-[12px] leading-none flex items-center justify-center"
+          aria-label="Clear search"
+          title="Clear search"
+        >
+          ×
+        </button>
+      )}
+    </div>
+  );
+}
+
+function SidebarMultiSelect({
+  label,
+  emptyLabel,
+  options,
+  selectedIds,
+  onChange,
+}: {
+  label: string;
+  emptyLabel: string;
+  options: { id: string; name: string; color: string | null }[];
+  selectedIds: string[];
+  onChange: (ids: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!wrapRef.current) return;
+      if (!wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  const toggle = (id: string) => {
+    onChange(
+      selectedIds.includes(id)
+        ? selectedIds.filter((x) => x !== id)
+        : [...selectedIds, id],
+    );
+  };
+
+  const summary =
+    selectedIds.length === 0
+      ? emptyLabel
+      : selectedIds.length === 1
+        ? options.find((o) => o.id === selectedIds[0])?.name ?? '1 selected'
+        : `${selectedIds.length} selected`;
+
+  return (
+    <div ref={wrapRef} className="relative w-full">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full text-left text-[11px] px-2 py-[6px] rounded-md border border-[#e5e7eb] bg-white text-[#1a1a2e] cursor-pointer flex items-center gap-2 hover:border-[#1a1a2e]"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <span className="text-[9px] font-mono uppercase tracking-[1px] text-[#9ca3af] shrink-0">
+          {label}
+        </span>
+        <span className="flex-1 truncate text-[11px] font-medium">{summary}</span>
+        <span className="text-[9px] text-[#9ca3af]">▾</span>
+      </button>
+      {open && (
+        <div className="absolute top-[110%] left-0 right-0 z-30 bg-white rounded-md border border-[#e5e7eb] shadow-[0_8px_24px_rgba(0,0,0,0.12)] max-h-[220px] overflow-y-auto py-1">
+          {options.length === 0 ? (
+            <div className="text-[11px] text-[#9ca3af] px-3 py-2">
+              No {label.toLowerCase()}s yet.
+            </div>
+          ) : (
+            <>
+              {selectedIds.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => onChange([])}
+                  className="w-full text-left text-[11px] px-3 py-[5px] bg-transparent border-0 cursor-pointer text-[#dc2626] hover:bg-[rgba(0,0,0,0.04)]"
+                >
+                  Clear {label.toLowerCase()} filter
+                </button>
+              )}
+              {options.map((o) => {
+                const selected = selectedIds.includes(o.id);
+                return (
+                  <label
+                    key={o.id}
+                    className="flex items-center gap-2 px-3 py-[5px] text-[12px] cursor-pointer hover:bg-[rgba(0,0,0,0.04)]"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selected}
+                      onChange={() => toggle(o.id)}
+                      className="cursor-pointer accent-[#1a1a2e]"
+                    />
+                    {o.color && (
+                      <span
+                        aria-hidden
+                        className="w-[10px] h-[10px] rounded-sm shrink-0"
+                        style={{ background: o.color }}
+                      />
+                    )}
+                    <span className="flex-1 truncate text-[#1a1a2e]">{o.name}</span>
+                  </label>
+                );
+              })}
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -968,21 +1140,26 @@ function DraggableTaskWithSubtasks({
         boxShadow: '0 1px 3px rgba(0,0,0,0.05), 0 0 0 1px #e5e7eb',
       }}
     >
-      <div className="flex items-center gap-1 pl-1 pr-2 py-1">
+      <div className="flex items-start gap-1 pl-1 pr-2 py-1">
         <button
           type="button"
           onClick={() => hasSubtasks && setExpanded((v) => !v)}
           disabled={!hasSubtasks}
-          className="w-5 h-5 flex items-center justify-center text-[11px] text-[#9ca3af] hover:text-[#1a1a2e] rounded bg-transparent border-0 shrink-0"
+          className="w-5 h-5 flex items-center justify-center text-[11px] text-[#9ca3af] hover:text-[#1a1a2e] rounded bg-transparent border-0 shrink-0 mt-[1px]"
           style={{ cursor: hasSubtasks ? 'pointer' : 'default', opacity: hasSubtasks ? 1 : 0.3 }}
           title={hasSubtasks ? (expanded ? 'Hide subtasks' : 'Show subtasks') : 'No open subtasks'}
           aria-label="Toggle subtasks"
         >
           {expanded ? '▾' : '▸'}
         </button>
-        <DraggableTaskHandle taskId={task.id} title={task.title} tagLabel={firstTag} />
+        <DraggableTaskHandle
+          taskId={task.id}
+          title={task.title}
+          tagLabel={firstTag}
+          status={task.effective_status}
+        />
         {hasSubtasks && (
-          <span className="text-[10px] font-mono text-[#9ca3af] shrink-0 px-1 tabular-nums">
+          <span className="text-[10px] font-mono text-[#9ca3af] shrink-0 px-1 tabular-nums mt-[2px]">
             {openSubtasks.length}
           </span>
         )}
@@ -1002,10 +1179,12 @@ function DraggableTaskHandle({
   taskId,
   title,
   tagLabel,
+  status,
 }: {
   taskId: string;
   title: string;
   tagLabel: TagType | undefined;
+  status?: 'todo' | 'in_progress' | 'done';
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `task__${taskId}`,
@@ -1018,8 +1197,20 @@ function DraggableTaskHandle({
       className="flex-1 min-w-0"
       style={{ cursor: 'grab', opacity: isDragging ? 0.4 : 1, touchAction: 'none' }}
     >
-      <div className="text-[12px] font-semibold text-[#1a1a2e] truncate">
-        {title}
+      <div className="flex items-start gap-[6px]">
+        <div
+          className="flex-1 min-w-0 text-[12px] font-semibold text-[#1a1a2e] leading-snug break-words"
+          style={{
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+          }}
+          title={title}
+        >
+          {title}
+        </div>
+        {status && status !== 'done' && <StatusPill status={status} />}
       </div>
       {tagLabel && (
         <div className="text-[10px] mt-0.5" style={{ color: tagLabel.color }}>
